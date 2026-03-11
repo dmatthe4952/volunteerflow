@@ -196,7 +196,7 @@ Use this if your staging server already has nginx/Traefik/Apache/Caddy handling 
 1. On the server, create `.env.staging` based on `.env.staging.example`.
 2. Set at minimum: `APP_URL`, `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_TOKEN`.
 3. Start the app container only:
-   - `docker compose -f docker-compose.staging.yml up --build -d`
+   - `docker compose --env-file .env.staging -f docker-compose.staging.yml up --build -d`
 4. Point your host reverse proxy upstream to `http://127.0.0.1:3000`.
 
 Notes:
@@ -209,7 +209,7 @@ Use this if you do **not** have a reverse proxy already.
 1. Create `.env.staging` based on `.env.staging.example` and set `CADDY_HOST` + `CADDY_EMAIL`.
 2. Ensure DNS points to the server, and ports `80/443` are open.
 3. Start app + Caddy:
-   - `docker compose -f docker-compose.staging.yml --profile caddy up --build -d`
+   - `docker compose --env-file .env.staging -f docker-compose.staging.yml --profile caddy up --build -d`
 
 ### Local dev: start
 1. Run `docker compose up`.
@@ -242,6 +242,12 @@ This is a temporary operational API until the manager UI supports custom message
   - `SMTP_HOST`
   - `SMTP_FROM_EMAIL`
   - (Optionally) `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM_NAME`
+
+### Managed Postgres + SSL (DigitalOcean, etc.)
+If you use a managed database and see TLS errors like `SELF_SIGNED_CERT_IN_CHAIN`, use one of these approaches:
+
+- Easiest (encryption without certificate verification): set `sslmode=require` in `DATABASE_URL`.
+- Strict (verify server cert/hostname): set `sslmode=verify-full` and provide the CA via `DATABASE_SSL_CA_PEM` or `DATABASE_SSL_CA_FILE`.
 
 Email types currently sent:
 - Signup confirmation (includes cancel link)

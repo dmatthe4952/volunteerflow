@@ -9,6 +9,24 @@ function readCaPem(): string | undefined {
   return undefined;
 }
 
+function parsePostgresUrl(connectionString: string): {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+} {
+  const url = new URL(connectionString);
+  const database = url.pathname.replace(/^\//, '');
+  return {
+    host: url.hostname,
+    port: url.port ? Number(url.port) : 5432,
+    user: url.username,
+    password: url.password,
+    database
+  };
+}
+
 function sslOptionsFromConnectionString(connectionString: string): any | undefined {
   try {
     const url = new URL(connectionString);
@@ -33,5 +51,16 @@ function sslOptionsFromConnectionString(connectionString: string): any | undefin
 
 export function createPgPool(connectionString: string): any {
   const ssl = sslOptionsFromConnectionString(connectionString);
-  return new pg.Pool({ connectionString, ssl });
+
+  // IMPORTANT: avoid passing `connectionString` straight through to node-postgres when it includes
+  // `sslmode=...`, because `pg-connection-string` may interpret sslmode with semantics that differ
+  // from libpq and can break managed-DB connections unless a CA is provided.
+  //
+  // We parse the URL ourselves and pass discrete fields + `ssl` so our `sslmode` mapping is honored.
+  try {
+    const parsed = parsePostgresUrl(connectionString);
+    return new pg.Pool({ ...parsed, ssl });
+  } catch {
+    return new pg.Pool({ connectionString, ssl });
+  }
 }

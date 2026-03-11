@@ -11,6 +11,8 @@ services:
       APP_TIMEZONE: America/New_York
       APP_LOG_FILE: /app/logs/app.log
     ports:
+      # NOTE: these `${...}` values are substituted by Docker Compose *before* containers start.
+      # To load them from `.env.staging`, run with: `docker compose --env-file .env.staging ...`
       - "${APP_BIND_IP:-127.0.0.1}:${APP_HOST_PORT:-3000}:3000"
     volumes:
       - uploads:/app/uploads
