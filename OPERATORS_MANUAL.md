@@ -219,6 +219,12 @@ Use this if you do **not** have a reverse proxy already.
 1. Run `docker compose exec app npm run seed`.
 2. The command prints demo credentials for `/admin/login` and `/manager/login`.
 
+### Staging: seed demo data
+Allowed in `APP_ENV=staging` (blocked in `production`).
+
+1. Run `docker compose --env-file .env.staging -f docker-compose.staging.yml exec app npm run seed`.
+2. The command prints demo credentials for `/admin/login` and `/manager/login`.
+
 ### Local dev: reset a user password
 1. Run `docker compose exec app npm run set-password -- <email> <newPassword>`.
 

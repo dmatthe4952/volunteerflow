@@ -12,8 +12,8 @@ function slugify(input: string): string {
 }
 
 async function main() {
-  if (config.env !== 'development' && config.env !== 'test') {
-    throw new Error('Seed script is only allowed in development/test.');
+  if (config.env === 'production') {
+    throw new Error('Seed script is not allowed in production.');
   }
 
   const db = createDb();
