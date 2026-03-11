@@ -1,9 +1,9 @@
 {
   # Staging/prod only; not used in local dev compose.
-  email you@example.com
+  email {$CADDY_EMAIL}
 }
 
-www.trtechapp.com {
+{$CADDY_HOST} {
   encode gzip
   reverse_proxy app:3000
 }

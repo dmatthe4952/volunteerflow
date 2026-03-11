@@ -1,5 +1,25 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env.staging
+    environment:
+      APP_ENV: staging
+      APP_PORT: 3000
+      APP_TIMEZONE: America/New_York
+      APP_LOG_FILE: /app/logs/app.log
+    ports:
+      - "${APP_BIND_IP:-127.0.0.1}:${APP_HOST_PORT:-3000}:3000"
+    volumes:
+      - uploads:/app/uploads
+      - ./logs:/app/logs
+
+  # Optional local Postgres (use only if you are NOT using a managed DB).
+  # Enable with: docker compose -f docker-compose.staging.yml --profile localdb up -d
   db:
+    profiles: ["localdb"]
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: volunteerflow
@@ -7,25 +27,17 @@ services:
       POSTGRES_PASSWORD: volunteerflow_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
-  app:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    environment:
-      APP_ENV: staging
-      APP_PORT: 3000
-      APP_URL: https://volunteerflow.example.com
-      APP_TIMEZONE: America/New_York
-      DATABASE_URL: postgres://volunteerflow:volunteerflow_password@db:5432/volunteerflow
-      SESSION_SECRET: replace-me
-    volumes:
-      - uploads:/app/uploads
-    depends_on:
-      - db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U volunteerflow -d volunteerflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   caddy:
+    profiles: ["caddy"]
     image: caddy:2-alpine
+    env_file:
+      - .env.staging
     ports:
       - "80:80"
       - "443:443"

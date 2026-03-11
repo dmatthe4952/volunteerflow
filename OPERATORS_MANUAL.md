@@ -190,6 +190,27 @@ View it:
 1. `tail -f logs/app.log`
 2. Or: `docker compose exec app sh -lc "tail -f /app/logs/app.log"`
 
+### Staging: deploy (managed Postgres + existing reverse proxy on the host)
+Use this if your staging server already has nginx/Traefik/Apache/Caddy handling ports `80/443`.
+
+1. On the server, create `.env.staging` based on `.env.staging.example`.
+2. Set at minimum: `APP_URL`, `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_TOKEN`.
+3. Start the app container only:
+   - `docker compose -f docker-compose.staging.yml up --build -d`
+4. Point your host reverse proxy upstream to `http://127.0.0.1:3000`.
+
+Notes:
+- If you start the `caddy` service while a host reverse proxy is already bound to `:80`/`:443`, you’ll get a “port already in use” error. In that case, do **not** run the `caddy` profile.
+- If you use a managed database (DigitalOcean, etc.), ensure the provider’s firewall/trusted sources allow the server’s public IP to connect.
+
+### Staging: deploy (built-in Caddy HTTPS)
+Use this if you do **not** have a reverse proxy already.
+
+1. Create `.env.staging` based on `.env.staging.example` and set `CADDY_HOST` + `CADDY_EMAIL`.
+2. Ensure DNS points to the server, and ports `80/443` are open.
+3. Start app + Caddy:
+   - `docker compose -f docker-compose.staging.yml --profile caddy up --build -d`
+
 ### Local dev: start
 1. Run `docker compose up`.
 2. Open `http://localhost:3000/`.
