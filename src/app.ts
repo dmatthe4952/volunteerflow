@@ -1329,5 +1329,33 @@ export async function buildApp(params: {
     }
   });
 
+  app.post('/ops/email/test', async (req, reply) => {
+    try {
+      requireAdminToken(req);
+      let body: Record<string, unknown> = (req.body ?? {}) as Record<string, unknown>;
+      if (typeof req.body === 'string') {
+        try {
+          body = JSON.parse(req.body) as Record<string, unknown>;
+        } catch {
+          body = {};
+        }
+      }
+
+      const to = String(body.to ?? '').trim();
+      const subject = String(body.subject ?? 'VolunteerFlow test email').trim();
+      const text = String(body.text ?? 'This is a test email from VolunteerFlow.').trim();
+
+      if (!to || !to.includes('@') || /\s/.test(to) || to.includes('\n') || to.includes('\r')) throw new Error('Valid `to` email is required.');
+      if (!subject || subject.length > 200 || subject.includes('\n') || subject.includes('\r')) throw new Error('Valid `subject` is required.');
+      if (!text || text.length > 20_000) throw new Error('Valid `text` is required.');
+
+      await sendEmail({ to, subject, text });
+      return reply.send({ ok: true });
+    } catch (err: any) {
+      const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : 400;
+      return reply.code(statusCode).send({ statusCode, error: 'Bad Request', message: String(err?.message ?? err) });
+    }
+  });
+
   return app;
 }

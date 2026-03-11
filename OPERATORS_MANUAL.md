@@ -242,6 +242,14 @@ This is a temporary operational API until the manager UI supports custom message
    - Header: `x-admin-token: $ADMIN_TOKEN`
    - Body JSON: `{"message":"..."}`.
 
+### Send a test email (ops endpoint)
+Useful for verifying email delivery without creating a signup.
+
+1. Send:
+   - `POST /ops/email/test`
+   - Header: `x-admin-token: $ADMIN_TOKEN`
+   - Body JSON: `{"to":"you@example.com","subject":"Test","text":"Hello"}`.
+
 ### SMTP / email behavior
 - If SMTP is not configured, the app logs email contents to stdout (dev-friendly behavior).
 - To send real email, set at minimum:
