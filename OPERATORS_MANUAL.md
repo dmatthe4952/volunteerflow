@@ -183,6 +183,10 @@ Notes:
 
 ## Operator / Dev (Deployment, Maintenance, Troubleshooting)
 
+### Health checks
+- `GET /healthz`: basic “process is up” check (public).
+- `GET /ops/health`: checks DB connectivity (requires header `x-admin-token: $ADMIN_TOKEN`).
+
 ### Application log file
 Local dev compose writes application logs to `/app/logs/app.log` inside the app container (bind-mounted to `./logs/app.log` on the host).
 

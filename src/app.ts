@@ -125,6 +125,10 @@ export async function buildApp(params: {
     root: path.join(projectRoot, 'views')
   });
 
+  app.get('/healthz', async (_req, reply) => {
+    return reply.send({ ok: true });
+  });
+
   nunjucks.configure(path.join(projectRoot, 'views'), {
     autoescape: true,
     noCache: config.env === 'development'
@@ -1354,6 +1358,17 @@ export async function buildApp(params: {
     } catch (err: any) {
       const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : 400;
       return reply.code(statusCode).send({ statusCode, error: 'Bad Request', message: String(err?.message ?? err) });
+    }
+  });
+
+  app.get('/ops/health', async (req, reply) => {
+    try {
+      requireAdminToken(req);
+      await sql`select 1 as ok`.execute(params.db);
+      return reply.send({ ok: true, db: 'ok' as const });
+    } catch (err: any) {
+      const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : 500;
+      return reply.code(statusCode).send({ ok: false, error: String(err?.message ?? err) });
     }
   });
 

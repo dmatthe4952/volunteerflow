@@ -19,6 +19,15 @@ services:
       # NOTE: these `${...}` values are substituted by Docker Compose *before* containers start.
       # To load them from `.env.staging`, run with: `docker compose --env-file .env.staging ...`
       - "${APP_BIND_IP:-127.0.0.1}:${APP_HOST_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     volumes:
       - uploads:/app/uploads
       - ./logs:/app/logs
