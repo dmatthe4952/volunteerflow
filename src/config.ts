@@ -9,6 +9,14 @@ function requireEnv(name: string): string {
 const env = (process.env.APP_ENV as AppEnv | undefined) ?? 'development';
 const port = Number(process.env.APP_PORT ?? '3000');
 
+function envBool(name: string): boolean | undefined {
+  const v = process.env[name];
+  if (!v) return undefined;
+  if (v === '1' || v.toLowerCase() === 'true') return true;
+  if (v === '0' || v.toLowerCase() === 'false') return false;
+  return undefined;
+}
+
 function envOrDevDefault(name: string, devDefault: string): string {
   const value = process.env[name];
   if (value) return value;
@@ -20,6 +28,7 @@ export const config = {
   env,
   port,
   appUrl: envOrDevDefault('APP_URL', `http://localhost:${port}`),
+  trustProxy: envBool('TRUST_PROXY') ?? (env === 'staging' || env === 'production'),
   timezone: process.env.APP_TIMEZONE ?? 'America/New_York',
   databaseUrl: requireEnv('DATABASE_URL'),
   sessionSecret: requireEnv('SESSION_SECRET'),

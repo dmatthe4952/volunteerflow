@@ -187,6 +187,11 @@ Notes:
 - `GET /healthz`: basic “process is up” check (public).
 - `GET /ops/health`: checks DB connectivity (requires header `x-admin-token: $ADMIN_TOKEN`).
 
+### Reverse proxy notes (staging/production)
+- Set `TRUST_PROXY=true` when running behind Apache/nginx so `req.ip` and rate limits work correctly.
+- Ensure your reverse proxy overwrites `X-Forwarded-For` and `X-Forwarded-Proto` (don’t trust client-supplied headers).
+- Consider blocking `/ops/*` at the reverse proxy (allow only from your IP or localhost) even though it is token-protected.
+
 ### Staging smoke test
 Run a quick end-to-end check after deploys:
 

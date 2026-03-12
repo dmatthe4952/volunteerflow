@@ -81,10 +81,22 @@ export async function buildApp(params: {
     }
   }
 
-  const app = Fastify({ logger });
+  const app = Fastify({ logger, trustProxy: config.trustProxy });
   const projectRoot = params.projectRoot ?? process.cwd();
 
   app.decorateRequest('currentUser', null);
+
+  app.addHook('onRequest', async (_req, reply) => {
+    reply.header('x-content-type-options', 'nosniff');
+    reply.header('x-frame-options', 'DENY');
+    reply.header('referrer-policy', 'no-referrer');
+    reply.header('permissions-policy', 'geolocation=(), microphone=(), camera=()');
+    reply.header('cross-origin-opener-policy', 'same-origin');
+
+    if ((config.env === 'staging' || config.env === 'production') && config.appUrl.startsWith('https://')) {
+      reply.header('strict-transport-security', 'max-age=15552000; includeSubDomains');
+    }
+  });
 
   app.addHook('onClose', async () => {
     await params.db.destroy();
