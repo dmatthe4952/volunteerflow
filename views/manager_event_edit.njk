@@ -14,6 +14,12 @@
     <div class="flash ok"><div>{{ ok }}</div></div>
   {% endif %}
 
+  {% if event.isArchived %}
+    <div class="flash err">
+      <div><strong>Event archived.</strong> This event is hidden from the public site and not accepting new signups.</div>
+    </div>
+  {% endif %}
+
   {% if event.cancelledAt %}
     <div class="flash err">
       <div><strong>Event cancelled.</strong> {% if event.cancellationMessage %}{{ event.cancellationMessage }}{% endif %}</div>
@@ -61,12 +67,19 @@
       <div class="actions">
         <button class="btn primary" type="submit">Save</button>
         <a class="btn" href="/manager/events/{{ event.id }}/signups">View Signups</a>
-        {% if event.isPublished %}
-          <button class="btn" formmethod="post" formaction="/manager/events/{{ event.id }}/unpublish" type="submit">Unpublish</button>
-        {% else %}
-          <button class="btn" formmethod="post" formaction="/manager/events/{{ event.id }}/publish" type="submit">Publish</button>
+        {% if not event.isArchived %}
+          {% if event.isPublished %}
+            <button class="btn" formmethod="post" formaction="/manager/events/{{ event.id }}/unpublish" type="submit">Unpublish</button>
+          {% else %}
+            <button class="btn" formmethod="post" formaction="/manager/events/{{ event.id }}/publish" type="submit">Publish</button>
+          {% endif %}
         {% endif %}
-        {% if not event.cancelledAt %}
+        {% if event.isArchived %}
+          <button class="btn" formmethod="post" formaction="/manager/events/{{ event.id }}/unarchive" type="submit">Unarchive</button>
+        {% else %}
+          <button class="btn danger" formmethod="post" formaction="/manager/events/{{ event.id }}/archive" type="submit">Archive</button>
+        {% endif %}
+        {% if (not event.cancelledAt) and (not event.isArchived) %}
           <a class="btn danger" href="/manager/events/{{ event.id }}/cancel">Cancel Event</a>
         {% endif %}
       </div>
@@ -185,4 +198,42 @@
       </div>
     </form>
   </div>
+
+  {% if templates and templates.length > 0 %}
+    <h2 style="margin-top:18px">Add Shift From Template</h2>
+    <div class="panel">
+      <form class="form" method="post" action="/manager/events/{{ event.id }}/shifts/from-template">
+        <label>
+          <span>Template</span>
+          <select name="templateId" required>
+            {% for t in templates %}
+              <option value="{{ t.id }}">{{ t.roleName }} ({{ t.durationMinutes }}m • min {{ t.minVolunteers }} • max {{ t.maxVolunteers }})</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="grid2">
+          <label>
+            <span>Date</span>
+            <input name="shiftDate" type="date" required value="{{ event.startDate }}" />
+          </label>
+          <label>
+            <span>Start time</span>
+            <input name="startTime" type="time" required />
+          </label>
+        </div>
+        <div class="actions">
+          <button class="btn primary" type="submit">Add From Template</button>
+          <a class="btn" href="/manager/templates">Manage Templates</a>
+        </div>
+      </form>
+    </div>
+  {% else %}
+    <div class="panel" style="margin-top:18px">
+      <div class="title">Shift Templates</div>
+      <p class="muted" style="margin-top:8px">Save common roles (duration + min/max) to add shifts faster.</p>
+      <div class="actions" style="margin-top:12px">
+        <a class="btn" href="/manager/templates">Create a template</a>
+      </div>
+    </div>
+  {% endif %}
 {% endblock %}

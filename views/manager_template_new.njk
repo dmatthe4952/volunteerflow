@@ -1,0 +1,47 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>New Shift Template</h1>
+  <div class="crumbs">
+    <a href="/manager/dashboard">Manager</a>
+    <span class="sep">/</span>
+    <a href="/manager/templates">Shift Templates</a>
+    <span class="sep">/</span>
+    <span>New</span>
+  </div>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <form class="form" method="post" action="/manager/templates/new">
+      <label>
+        <span>Role name</span>
+        <input name="roleName" required maxlength="120" value="{{ template and template.roleName or '' }}" />
+      </label>
+      <label>
+        <span>Role description</span>
+        <input name="roleDescription" maxlength="500" value="{{ template and template.roleDescription or '' }}" />
+      </label>
+      <div class="grid2">
+        <label>
+          <span>Duration (minutes)</span>
+          <input name="durationMinutes" type="number" min="15" step="15" required value="{{ template and template.durationMinutes or 60 }}" />
+        </label>
+        <label>
+          <span>Min volunteers</span>
+          <input name="minVolunteers" type="number" min="0" step="1" required value="{{ template and template.minVolunteers or 0 }}" />
+        </label>
+      </div>
+      <label>
+        <span>Max volunteers</span>
+        <input name="maxVolunteers" type="number" min="1" step="1" required value="{{ template and template.maxVolunteers or 1 }}" />
+      </label>
+      <div class="actions">
+        <button class="btn primary" type="submit">Create</button>
+        <a class="btn" href="/manager/templates">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}
+

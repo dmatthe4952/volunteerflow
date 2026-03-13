@@ -7,16 +7,41 @@
     </div>
   </div>
 
-  {% if events.length == 0 %}
+  {% if events.length == 0 and (not archivedEvents or archivedEvents.length == 0) %}
     <div class="panel" style="margin-top:14px"><p class="muted">No events yet.</p></div>
   {% else %}
+    {% if events.length == 0 %}
+      <div class="panel" style="margin-top:14px"><p class="muted">No active events.</p></div>
+    {% endif %}
+    {% if events.length > 0 %}
+      <div class="stack" style="margin-top:14px">
+        {% for e in events %}
+          <div class="panel">
+            <div class="title"><a href="/manager/events/{{ e.id }}/edit">{{ e.title }}</a></div>
+            <div class="meta">{{ e.organizationName }} • {{ e.dateRange }}</div>
+            <div class="muted" style="margin-top:8px">
+              {% if e.isPublished %}Published{% else %}Draft{% endif %}
+              {% if e.isArchived %} • Archived{% endif %}
+              {% if e.cancelledAt %} • Cancelled{% endif %}
+            </div>
+            <div class="muted" style="margin-top:6px">
+              Public: <a href="{{ e.publicUrl }}">{{ e.publicUrl }}</a>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {% if archivedEvents and archivedEvents.length > 0 %}
+    <h2 style="margin-top:18px">Archived</h2>
     <div class="stack" style="margin-top:14px">
-      {% for e in events %}
+      {% for e in archivedEvents %}
         <div class="panel">
           <div class="title"><a href="/manager/events/{{ e.id }}/edit">{{ e.title }}</a></div>
           <div class="meta">{{ e.organizationName }} • {{ e.dateRange }}</div>
           <div class="muted" style="margin-top:8px">
-            {% if e.isPublished %}Published{% else %}Draft{% endif %}
+            Archived • {% if e.isPublished %}Published{% else %}Draft{% endif %}
             {% if e.cancelledAt %} • Cancelled{% endif %}
           </div>
           <div class="muted" style="margin-top:6px">
@@ -27,4 +52,3 @@
     </div>
   {% endif %}
 {% endblock %}
-

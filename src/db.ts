@@ -69,6 +69,18 @@ export interface ShiftsTable {
   updated_at: Generated<string>;
 }
 
+export interface RoleTemplatesTable {
+  id: Generated<string>;
+  owner_user_id: string;
+  role_name: string;
+  role_description: string | null;
+  duration_minutes: number;
+  default_min_volunteers: number;
+  default_max_volunteers: number;
+  created_at: Generated<string>;
+  updated_at: Generated<string>;
+}
+
 export interface SignupsTable {
   id: Generated<string>;
   shift_id: string;
@@ -124,6 +136,7 @@ export interface DB {
   organizations: OrganizationsTable;
   events: EventsTable;
   shifts: ShiftsTable;
+  role_templates: RoleTemplatesTable;
   signups: SignupsTable;
   sessions: SessionsTable;
   volunteer_email_tokens: VolunteerEmailTokensTable;

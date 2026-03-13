@@ -1,0 +1,39 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>Shift Templates</h1>
+  <div class="crumbs">
+    <a href="/manager/dashboard">Manager</a>
+    <span class="sep">/</span>
+    <span>Shift Templates</span>
+  </div>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+  {% if ok %}
+    <div class="flash ok"><div>{{ ok }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="actions">
+      <a class="btn primary" href="/manager/templates/new">New Template</a>
+    </div>
+  </div>
+
+  {% if templates.length == 0 %}
+    <div class="panel" style="margin-top:14px"><p class="muted">No templates yet.</p></div>
+  {% else %}
+    <div class="stack" style="margin-top:14px">
+      {% for t in templates %}
+        <div class="panel">
+          <div class="title"><a href="/manager/templates/{{ t.id }}/edit">{{ t.roleName }}</a></div>
+          <div class="meta">Duration: {{ t.durationMinutes }} min • Min: {{ t.minVolunteers }} • Max: {{ t.maxVolunteers }}</div>
+          {% if t.roleDescription %}
+            <div class="muted" style="margin-top:8px">{{ t.roleDescription }}</div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}
+

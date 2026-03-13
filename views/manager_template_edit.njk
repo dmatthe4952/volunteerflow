@@ -1,0 +1,59 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>Edit Shift Template</h1>
+  <div class="crumbs">
+    <a href="/manager/dashboard">Manager</a>
+    <span class="sep">/</span>
+    <a href="/manager/templates">Shift Templates</a>
+    <span class="sep">/</span>
+    <span>{{ template.roleName }}</span>
+  </div>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+  {% if ok %}
+    <div class="flash ok"><div>{{ ok }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <form class="form" method="post" action="/manager/templates/{{ template.id }}/edit">
+      <label>
+        <span>Role name</span>
+        <input name="roleName" required maxlength="120" value="{{ template.roleName }}" />
+      </label>
+      <label>
+        <span>Role description</span>
+        <input name="roleDescription" maxlength="500" value="{{ template.roleDescription }}" />
+      </label>
+      <div class="grid2">
+        <label>
+          <span>Duration (minutes)</span>
+          <input name="durationMinutes" type="number" min="15" step="15" required value="{{ template.durationMinutes }}" />
+        </label>
+        <label>
+          <span>Min volunteers</span>
+          <input name="minVolunteers" type="number" min="0" step="1" required value="{{ template.minVolunteers }}" />
+        </label>
+      </div>
+      <label>
+        <span>Max volunteers</span>
+        <input name="maxVolunteers" type="number" min="1" step="1" required value="{{ template.maxVolunteers }}" />
+      </label>
+      <div class="actions">
+        <button class="btn primary" type="submit">Save</button>
+        <a class="btn" href="/manager/templates">Back</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel" style="margin-top:14px">
+    <div class="title">Danger zone</div>
+    <div class="actions" style="margin-top:12px">
+      <form method="post" action="/manager/templates/{{ template.id }}/delete">
+        <button class="btn danger" type="submit">Delete template</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+

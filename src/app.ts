@@ -600,6 +600,7 @@ export async function buildApp(params: {
       .selectFrom('events')
       .select(['id', 'slug', 'title', 'start_date', 'end_date', 'is_published', 'cancelled_at'])
       .where('manager_id', '=', currentUser.id)
+      .where('is_archived', '=', false)
       .orderBy('start_date', 'desc')
       .execute();
 
@@ -771,6 +772,167 @@ export async function buildApp(params: {
   });
 
   // Manager event CRUD
+  app.get('/manager/templates', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const qs = req.query as Record<string, string | undefined>;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+
+    const rows = await params.db
+      .selectFrom('role_templates')
+      .select([
+        'id',
+        'role_name',
+        'role_description',
+        'duration_minutes',
+        'default_min_volunteers',
+        'default_max_volunteers',
+        'created_at'
+      ])
+      .where('owner_user_id', '=', currentUser.id)
+      .orderBy('role_name', 'asc')
+      .execute();
+
+    return render(reply, 'manager_templates.njk', {
+      ok,
+      error,
+      templates: rows.map((t: any) => ({
+        id: t.id,
+        roleName: t.role_name,
+        roleDescription: t.role_description ?? '',
+        durationMinutes: t.duration_minutes,
+        minVolunteers: t.default_min_volunteers,
+        maxVolunteers: t.default_max_volunteers,
+        createdAt: toIso(t.created_at)
+      }))
+    });
+  });
+
+  app.get('/manager/templates/new', async (req, reply) => {
+    requireRole(req, 'event_manager');
+    return render(reply, 'manager_template_new.njk', { template: null });
+  });
+
+  app.post('/manager/templates/new', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const roleName = String(body.roleName ?? '').trim();
+    const roleDescription = String(body.roleDescription ?? '').trim();
+    const durationMinutes = Number(body.durationMinutes ?? 0);
+    const minVolunteers = Number(body.minVolunteers ?? 0);
+    const maxVolunteers = Number(body.maxVolunteers ?? 0);
+
+    try {
+      if (!roleName || roleName.length > 120) throw new Error('Invalid role name.');
+      if (roleDescription.length > 500) throw new Error('Role description is too long.');
+      if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) throw new Error('Invalid duration.');
+      if (!Number.isFinite(minVolunteers) || minVolunteers < 0) throw new Error('Invalid min volunteers.');
+      if (!Number.isFinite(maxVolunteers) || maxVolunteers <= 0) throw new Error('Invalid max volunteers.');
+
+      await params.db
+        .insertInto('role_templates')
+        .values({
+          owner_user_id: currentUser.id,
+          role_name: roleName,
+          role_description: roleDescription || null,
+          duration_minutes: durationMinutes,
+          default_min_volunteers: minVolunteers,
+          default_max_volunteers: maxVolunteers
+        })
+        .execute();
+
+      return reply.code(303).redirect(`/manager/templates?ok=${encodeURIComponent('Template created.')}`);
+    } catch (err: any) {
+      return render(reply, 'manager_template_new.njk', {
+        error: String(err?.message ?? err),
+        template: { id: null, roleName, roleDescription, durationMinutes, minVolunteers, maxVolunteers }
+      });
+    }
+  });
+
+  app.get('/manager/templates/:id/edit', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    const qs = req.query as Record<string, string | undefined>;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+
+    const row = await params.db
+      .selectFrom('role_templates')
+      .select(['id', 'role_name', 'role_description', 'duration_minutes', 'default_min_volunteers', 'default_max_volunteers'])
+      .where('id', '=', id)
+      .where('owner_user_id', '=', currentUser.id)
+      .executeTakeFirst();
+    if (!row) return reply.code(404).view('not_found.njk', { message: 'Template not found.' });
+
+    return render(reply, 'manager_template_edit.njk', {
+      ok,
+      error,
+      template: {
+        id: row.id,
+        roleName: row.role_name,
+        roleDescription: row.role_description ?? '',
+        durationMinutes: row.duration_minutes,
+        minVolunteers: row.default_min_volunteers,
+        maxVolunteers: row.default_max_volunteers
+      }
+    });
+  });
+
+  app.post('/manager/templates/:id/edit', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const roleName = String(body.roleName ?? '').trim();
+    const roleDescription = String(body.roleDescription ?? '').trim();
+    const durationMinutes = Number(body.durationMinutes ?? 0);
+    const minVolunteers = Number(body.minVolunteers ?? 0);
+    const maxVolunteers = Number(body.maxVolunteers ?? 0);
+
+    try {
+      if (!roleName || roleName.length > 120) throw new Error('Invalid role name.');
+      if (roleDescription.length > 500) throw new Error('Role description is too long.');
+      if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) throw new Error('Invalid duration.');
+      if (!Number.isFinite(minVolunteers) || minVolunteers < 0) throw new Error('Invalid min volunteers.');
+      if (!Number.isFinite(maxVolunteers) || maxVolunteers <= 0) throw new Error('Invalid max volunteers.');
+
+      const updated = await params.db
+        .updateTable('role_templates')
+        .set({
+          role_name: roleName,
+          role_description: roleDescription || null,
+          duration_minutes: durationMinutes,
+          default_min_volunteers: minVolunteers,
+          default_max_volunteers: maxVolunteers
+        })
+        .where('id', '=', id)
+        .where('owner_user_id', '=', currentUser.id)
+        .executeTakeFirst();
+
+      if (Number((updated as any)?.numUpdatedRows ?? 0) === 0) throw new Error('Template not found.');
+      return reply.code(303).redirect(`/manager/templates/${id}/edit?ok=${encodeURIComponent('Saved.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/templates/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/manager/templates/:id/delete', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+
+    const deleted = await params.db
+      .deleteFrom('role_templates')
+      .where('id', '=', id)
+      .where('owner_user_id', '=', currentUser.id)
+      .executeTakeFirst();
+
+    if (Number((deleted as any)?.numDeletedRows ?? 0) === 0) {
+      return reply.code(404).view('not_found.njk', { message: 'Template not found.' });
+    }
+
+    return reply.code(303).redirect(`/manager/templates?ok=${encodeURIComponent('Template deleted.')}`);
+  });
+
   app.get('/manager/events', async (req, reply) => {
     const currentUser = requireRole(req, 'event_manager');
     const events = await params.db
@@ -783,22 +945,30 @@ export async function buildApp(params: {
         'events.start_date',
         'events.end_date',
         'events.is_published',
+        'events.is_archived',
         'events.cancelled_at',
         'organizations.name as organization_name'
       ])
       .where('events.manager_id', '=', currentUser.id)
       .orderBy('events.start_date', 'desc')
       .execute();
+
+    const mapEvent = (e: any) => ({
+      id: e.id,
+      title: e.title,
+      organizationName: e.organization_name,
+      dateRange: e.start_date === e.end_date ? e.start_date : `${e.start_date} – ${e.end_date}`,
+      isPublished: e.is_published,
+      isArchived: e.is_archived,
+      cancelledAt: e.cancelled_at,
+      publicUrl: `/events/${encodeURIComponent(e.slug ?? e.id)}`
+    });
+
+    const activeEvents = events.filter((e: any) => !e.is_archived).map(mapEvent);
+    const archivedEvents = events.filter((e: any) => e.is_archived).map(mapEvent);
     return render(reply, 'manager_events.njk', {
-      events: events.map((e) => ({
-        id: e.id,
-        title: e.title,
-        organizationName: e.organization_name,
-        dateRange: e.start_date === e.end_date ? e.start_date : `${e.start_date} – ${e.end_date}`,
-        isPublished: e.is_published,
-        cancelledAt: e.cancelled_at,
-        publicUrl: `/events/${encodeURIComponent(e.slug ?? e.id)}`
-      }))
+      events: activeEvents,
+      archivedEvents
     });
   });
 
@@ -870,6 +1040,7 @@ export async function buildApp(params: {
         'location_name',
         'location_map_url',
         'is_published',
+        'is_archived',
         'cancelled_at',
         'cancellation_message'
       ])
@@ -898,6 +1069,13 @@ export async function buildApp(params: {
       .orderBy('start_time', 'asc')
       .execute();
 
+    const templates = await params.db
+      .selectFrom('role_templates')
+      .select(['id', 'role_name', 'duration_minutes', 'default_min_volunteers', 'default_max_volunteers'])
+      .where('owner_user_id', '=', currentUser.id)
+      .orderBy('role_name', 'asc')
+      .execute();
+
     const description = (event.description_html ?? '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p>/gi, '\n\n').replace(/<\/?p>/gi, '');
     return render(reply, 'manager_event_edit.njk', {
       error,
@@ -913,9 +1091,17 @@ export async function buildApp(params: {
         locationName: event.location_name ?? '',
         locationMapUrl: event.location_map_url ?? '',
         isPublished: event.is_published,
+        isArchived: event.is_archived,
         cancelledAt: event.cancelled_at,
         cancellationMessage: event.cancellation_message
       },
+      templates: templates.map((t: any) => ({
+        id: t.id,
+        roleName: t.role_name,
+        durationMinutes: t.duration_minutes,
+        minVolunteers: t.default_min_volunteers,
+        maxVolunteers: t.default_max_volunteers
+      })),
       shifts: shifts.map((s) => ({
         id: s.id,
         roleName: s.role_name,
@@ -973,6 +1159,16 @@ export async function buildApp(params: {
   app.post('/manager/events/:id/publish', async (req, reply) => {
     const currentUser = requireRole(req, 'event_manager');
     const { id } = req.params as { id: string };
+    const ev = await params.db
+      .selectFrom('events')
+      .select(['is_archived', 'cancelled_at'])
+      .where('id', '=', id)
+      .where('manager_id', '=', currentUser.id)
+      .executeTakeFirst();
+    if (!ev) return reply.code(404).view('not_found.njk', { message: 'Event not found.' });
+    if (ev.is_archived) return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent('Event is archived.')}`);
+    if (ev.cancelled_at) return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent('Event is cancelled.')}`);
+
     const shifts = await params.db
       .selectFrom('shifts')
       .select((eb) => eb.fn.countAll<number>().as('c'))
@@ -1002,6 +1198,52 @@ export async function buildApp(params: {
     return reply.code(303).redirect(`/manager/events/${id}/edit`);
   });
 
+  app.post('/manager/events/:id/archive', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+
+    const event = await params.db
+      .selectFrom('events')
+      .select(['id', 'is_archived'])
+      .where('id', '=', id)
+      .where('manager_id', '=', currentUser.id)
+      .executeTakeFirst();
+    if (!event) return reply.code(404).view('not_found.njk', { message: 'Event not found.' });
+    if (event.is_archived) return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Event already archived.')}`);
+
+    await params.db
+      .updateTable('events')
+      .set({ is_archived: true, is_published: false })
+      .where('id', '=', id)
+      .where('manager_id', '=', currentUser.id)
+      .execute();
+
+    return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Event archived. It is now unpublished.')}`);
+  });
+
+  app.post('/manager/events/:id/unarchive', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+
+    const event = await params.db
+      .selectFrom('events')
+      .select(['id', 'is_archived'])
+      .where('id', '=', id)
+      .where('manager_id', '=', currentUser.id)
+      .executeTakeFirst();
+    if (!event) return reply.code(404).view('not_found.njk', { message: 'Event not found.' });
+    if (!event.is_archived) return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Event is not archived.')}`);
+
+    await params.db
+      .updateTable('events')
+      .set({ is_archived: false })
+      .where('id', '=', id)
+      .where('manager_id', '=', currentUser.id)
+      .execute();
+
+    return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Event unarchived. Publish when ready.')}`);
+  });
+
   app.post('/manager/events/:id/shifts', async (req, reply) => {
     const currentUser = requireRole(req, 'event_manager');
     const { id } = req.params as { id: string };
@@ -1023,11 +1265,13 @@ export async function buildApp(params: {
 
       const ev = await params.db
         .selectFrom('events')
-        .select(['id'])
+        .select(['id', 'is_archived', 'cancelled_at'])
         .where('id', '=', id)
         .where('manager_id', '=', currentUser.id)
         .executeTakeFirst();
       if (!ev) throw new Error('Event not found.');
+      if (ev.is_archived) throw new Error('Event is archived.');
+      if (ev.cancelled_at) throw new Error('Event is cancelled.');
 
       const endTime = endTimeFromStartAndDuration(startTime, durationMinutes);
       const startTimeDb = `${String(startTime).slice(0, 5)}:00`;
@@ -1048,6 +1292,62 @@ export async function buildApp(params: {
         })
         .execute();
       return reply.code(303).redirect(`/manager/events/${id}/edit`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/manager/events/:id/shifts/from-template', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const templateId = String(body.templateId ?? '').trim();
+    const shiftDate = String(body.shiftDate ?? '').trim();
+    const startTime = String(body.startTime ?? '').trim();
+
+    try {
+      if (!templateId) throw new Error('Template is required.');
+      const sd = parseDateOnly(shiftDate);
+      if (!startTime) throw new Error('Start time is required.');
+
+      const ev = await params.db
+        .selectFrom('events')
+        .select(['id', 'is_archived', 'cancelled_at'])
+        .where('id', '=', id)
+        .where('manager_id', '=', currentUser.id)
+        .executeTakeFirst();
+      if (!ev) throw new Error('Event not found.');
+      if (ev.is_archived) throw new Error('Event is archived.');
+      if (ev.cancelled_at) throw new Error('Event is cancelled.');
+
+      const tpl = await params.db
+        .selectFrom('role_templates')
+        .select(['id', 'role_name', 'role_description', 'duration_minutes', 'default_min_volunteers', 'default_max_volunteers'])
+        .where('id', '=', templateId)
+        .where('owner_user_id', '=', currentUser.id)
+        .executeTakeFirst();
+      if (!tpl) throw new Error('Template not found.');
+
+      const endTime = endTimeFromStartAndDuration(startTime, tpl.duration_minutes);
+      const startTimeDb = `${String(startTime).slice(0, 5)}:00`;
+
+      await params.db
+        .insertInto('shifts')
+        .values({
+          event_id: id,
+          role_name: tpl.role_name,
+          role_description: tpl.role_description,
+          duration_minutes: tpl.duration_minutes,
+          shift_date: sd,
+          start_time: startTimeDb,
+          end_time: endTime,
+          min_volunteers: tpl.default_min_volunteers,
+          max_volunteers: tpl.default_max_volunteers,
+          is_active: true
+        })
+        .execute();
+
+      return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Shift added from template.')}`);
     } catch (err: any) {
       return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);
     }
