@@ -246,6 +246,8 @@ Optional (staging): use the helper script to split “build” from “up” (an
 Optional (staging): one-command update from git + deploy + smoke test:
 - `GIT_REMOTE_URL=https://github.com/dmatthe4952/volunteerflow.git sh scripts/deploy-staging-from-git.sh`
 
+Note: you do not need a modern Node.js installed on the host to deploy. The TypeScript build and template checks run inside the Docker image build (Node 20).
+
 ### Staging: deploy (built-in Caddy HTTPS)
 Use this if you do **not** have a reverse proxy already.
 
