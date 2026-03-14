@@ -47,7 +47,7 @@ http_post_json() {
 }
 
 check_healthz() {
-  say "[1/5] GET /healthz"
+  say "[1/6] GET /healthz"
   body="$(http_get "$BASE_URL/healthz" || true)"
   if printf '%s' "$body" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
     say "  OK"
@@ -59,7 +59,7 @@ check_healthz() {
 }
 
 check_ops_health() {
-  say "[2/5] GET /ops/health"
+  say "[2/6] GET /ops/health"
   if [ -z "$ADMIN_TOKEN" ]; then
     say "  SKIP: ADMIN_TOKEN not set"
     return 0
