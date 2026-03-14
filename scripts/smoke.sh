@@ -32,6 +32,11 @@ http_get() {
   curl -fsS --max-time 10 -H 'accept: application/json' "$url"
 }
 
+http_status_html() {
+  url="$1"
+  curl -sS --max-time 10 -H 'accept: text/html' -o /dev/null -w '%{http_code}' "$url" || printf '000'
+}
+
 http_post_json() {
   url="$1"
   json="$2"
@@ -42,7 +47,7 @@ http_post_json() {
 }
 
 check_healthz() {
-  say "[1/3] GET /healthz"
+  say "[1/5] GET /healthz"
   body="$(http_get "$BASE_URL/healthz" || true)"
   if printf '%s' "$body" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
     say "  OK"
@@ -54,7 +59,7 @@ check_healthz() {
 }
 
 check_ops_health() {
-  say "[2/3] GET /ops/health"
+  say "[2/5] GET /ops/health"
   if [ -z "$ADMIN_TOKEN" ]; then
     say "  SKIP: ADMIN_TOKEN not set"
     return 0
@@ -70,8 +75,30 @@ check_ops_health() {
   fi
 }
 
+check_public_pages() {
+  say "[3/5] GET / (HTML)"
+  code="$(http_status_html "$BASE_URL/" || true)"
+  if [ "$code" = "200" ]; then
+    say "  OK"
+  else
+    say "  FAIL: HTTP $code"
+    curl -sS --max-time 10 -H 'accept: text/html' "$BASE_URL/" 2>/dev/null | sed -n '1,5p' || true
+    fail=1
+  fi
+
+  say "[4/5] GET /admin/login (HTML)"
+  code="$(http_status_html "$BASE_URL/admin/login" || true)"
+  if [ "$code" = "200" ] || [ "$code" = "303" ]; then
+    say "  OK"
+  else
+    say "  FAIL: HTTP $code"
+    curl -sS --max-time 10 -H 'accept: text/html' "$BASE_URL/admin/login" 2>/dev/null | sed -n '1,5p' || true
+    fail=1
+  fi
+}
+
 check_email_test() {
-  say "[3/3] POST /ops/email/test"
+  say "[5/5] POST /ops/email/test"
   if [ -z "$ADMIN_TOKEN" ]; then
     say "  SKIP: ADMIN_TOKEN not set"
     return 0
@@ -96,6 +123,7 @@ check_email_test() {
 
 check_healthz
 check_ops_health
+check_public_pages
 check_email_test
 
 if [ "$fail" -ne 0 ]; then
@@ -104,4 +132,3 @@ if [ "$fail" -ne 0 ]; then
 fi
 
 say "Smoke test: OK"
-

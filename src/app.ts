@@ -87,6 +87,60 @@ export async function buildApp(params: {
 
   app.decorateRequest('currentUser', null);
 
+  app.setErrorHandler(async (err: any, req: any, reply: any) => {
+    const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : 500;
+    const requestId = req?.id;
+
+    // Always log the full error server-side (including stack).
+    try {
+      app.log.error(
+        {
+          err,
+          statusCode,
+          requestId,
+          method: req?.method,
+          url: req?.url
+        },
+        'request failed'
+      );
+    } catch {
+      // ignore
+    }
+
+    if (reply.sent) return;
+
+    const accept = typeof req?.headers?.accept === 'string' ? req.headers.accept : '';
+    const wantsHtml = accept.includes('text/html');
+    const publicHtml =
+      req?.method === 'GET' &&
+      (req?.url === '/' ||
+        req?.url?.startsWith?.('/events/') ||
+        req?.url?.startsWith?.('/my') ||
+        req?.url?.startsWith?.('/cancel/') ||
+        req?.url?.startsWith?.('/admin/') ||
+        req?.url?.startsWith?.('/manager/'));
+
+    const safeMessage =
+      config.env === 'development' || config.env === 'test'
+        ? String(err?.message ?? err)
+        : 'Something went wrong. Please try again in a moment.';
+
+    if (wantsHtml && publicHtml) {
+      return reply.code(statusCode).view('error.njk', {
+        statusCode,
+        message: safeMessage,
+        requestId: requestId ? String(requestId) : ''
+      });
+    }
+
+    return reply.code(statusCode).send({
+      statusCode,
+      error: statusCode >= 500 ? 'Internal Server Error' : 'Error',
+      message: safeMessage,
+      requestId: requestId ? String(requestId) : ''
+    });
+  });
+
   app.addHook('onRequest', async (_req, reply) => {
     reply.header('x-content-type-options', 'nosniff');
     reply.header('x-frame-options', 'DENY');
@@ -2033,6 +2087,124 @@ export async function buildApp(params: {
       const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : 500;
       return reply.code(statusCode).send({ ok: false, error: String(err?.message ?? err) });
     }
+  });
+
+  app.get('/ops/diag/schema', async (req, reply) => {
+    requireAdminToken(req);
+
+    const expected: Record<string, string[]> = {
+      users: ['id', 'email', 'password_hash', 'display_name', 'role', 'is_active', 'created_at', 'updated_at'],
+      organizations: ['id', 'name', 'slug', 'created_by', 'created_at', 'updated_at'],
+      events: [
+        'id',
+        'organization_id',
+        'manager_id',
+        'slug',
+        'title',
+        'description_html',
+        'start_date',
+        'end_date',
+        'is_published',
+        'is_archived',
+        'cancelled_at',
+        'cancellation_message',
+        'created_at',
+        'updated_at'
+      ],
+      shifts: [
+        'id',
+        'event_id',
+        'role_name',
+        'duration_minutes',
+        'shift_date',
+        'start_time',
+        'end_time',
+        'min_volunteers',
+        'max_volunteers',
+        'is_active',
+        'created_at',
+        'updated_at'
+      ],
+      signups: [
+        'id',
+        'shift_id',
+        'first_name',
+        'last_name',
+        'email',
+        'status',
+        'cancel_token',
+        'cancel_token_hmac',
+        'cancel_token_expires_at',
+        'created_at',
+        'updated_at'
+      ],
+      sessions: ['id', 'user_id', 'data', 'expires_at', 'created_at', 'updated_at'],
+      volunteer_email_tokens: ['id', 'email', 'token_hmac', 'expires_at', 'used_at', 'created_at'],
+      notification_sends: ['id', 'kind', 'to_email', 'subject', 'body', 'status', 'error', 'created_at', 'sent_at']
+    };
+
+    const missingTables: string[] = [];
+    const missingColumns: Record<string, string[]> = {};
+    const presentColumns: Record<string, string[]> = {};
+
+    for (const table of Object.keys(expected)) {
+      const exists = await sql<{ c: number }>`
+        select count(*)::int as c
+        from information_schema.tables
+        where table_schema = 'public'
+          and table_name = ${table}
+      `.execute(params.db);
+      const tableExists = Number(exists.rows?.[0]?.c ?? 0) > 0;
+      if (!tableExists) {
+        missingTables.push(table);
+        continue;
+      }
+
+      const colsRes = await sql<{ column_name: string }>`
+        select column_name
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = ${table}
+        order by ordinal_position
+      `.execute(params.db);
+      const cols = colsRes.rows.map((r) => r.column_name);
+      presentColumns[table] = cols;
+      const missing = expected[table].filter((c) => !cols.includes(c));
+      if (missing.length) missingColumns[table] = missing;
+    }
+
+    let pgcryptoInstalled = false;
+    try {
+      const ext = await sql<{ extname: string }>`
+        select extname from pg_extension where extname = 'pgcrypto'
+      `.execute(params.db);
+      pgcryptoInstalled = ext.rows.length > 0;
+    } catch {
+      // ignore
+    }
+
+    let appliedMigrations: string[] = [];
+    try {
+      const mig = await sql<{ name: string }>`select name from schema_migrations order by name`.execute(params.db);
+      appliedMigrations = mig.rows.map((r) => r.name);
+    } catch {
+      appliedMigrations = [];
+    }
+
+    let migrationsOnDisk: string[] = [];
+    try {
+      migrationsOnDisk = fs.readdirSync(path.join(projectRoot, 'migrations')).filter((n) => n.endsWith('.sql')).sort();
+    } catch {
+      migrationsOnDisk = [];
+    }
+
+    const ok = missingTables.length === 0 && Object.keys(missingColumns).length === 0;
+    return reply.send({
+      ok,
+      pgcryptoInstalled,
+      schema: { missingTables, missingColumns, presentColumns },
+      migrations: { applied: appliedMigrations, onDisk: migrationsOnDisk }
+    });
   });
 
   return app;

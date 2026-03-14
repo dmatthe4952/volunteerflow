@@ -1,0 +1,12 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <div class="panel">
+    <h1>Sorry—something went wrong</h1>
+    <p class="muted">Error {{ statusCode }}.</p>
+    <p>{{ message }}</p>
+    {% if requestId %}
+      <p class="muted">Request ID: <code>{{ requestId }}</code></p>
+    {% endif %}
+    <p><a class="btn" href="/">Back to home</a></p>
+  </div>
+{% endblock %}

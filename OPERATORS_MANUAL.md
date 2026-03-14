@@ -186,6 +186,7 @@ Notes:
 ### Health checks
 - `GET /healthz`: basic “process is up” check (public).
 - `GET /ops/health`: checks DB connectivity (requires header `x-admin-token: $ADMIN_TOKEN`).
+- `GET /ops/diag/schema`: checks for schema drift (missing tables/columns and migration visibility) (requires header `x-admin-token: $ADMIN_TOKEN`).
 
 ### Reverse proxy notes (staging/production)
 - Set `TRUST_PROXY=true` when running behind Apache/nginx so `req.ip` and rate limits work correctly.
