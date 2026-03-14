@@ -183,6 +183,9 @@ Notes:
 
 ## Operator / Dev (Deployment, Maintenance, Troubleshooting)
 
+### Staging
+- Staging base URL: `https://www.trtechapp.com`
+
 ### Health checks
 - `GET /healthz`: basic “process is up” check (public).
 - `GET /ops/health`: checks DB connectivity (requires header `x-admin-token: $ADMIN_TOKEN`).

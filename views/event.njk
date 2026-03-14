@@ -134,7 +134,7 @@
           if (email) email.addEventListener('input', function () { localStorage.setItem('vf_email', email.value); });
         });
 
-        var flashShiftId = {{ flash and flash.shiftId ? ('"' ~ flash.shiftId ~ '"') : 'null' }};
+        var flashShiftId = {{ ((flash and flash.shiftId) or null) | dump }};
         if (flashShiftId) {
           var panel = document.getElementById('shift-' + flashShiftId);
           if (panel) {
