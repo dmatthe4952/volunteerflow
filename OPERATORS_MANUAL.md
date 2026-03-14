@@ -223,6 +223,10 @@ View it:
 1. `tail -f logs/app.log`
 2. Or: `docker compose exec app sh -lc "tail -f /app/logs/app.log"`
 
+### Ops: template compile check
+If a deploy fails with a Nunjucks template parse error (or you want to verify templates on a running container), call:
+- `curl -fsS -H "x-admin-token: $ADMIN_TOKEN" "$APP_URL/ops/templates/compile"`
+
 ### Staging: deploy (managed Postgres + existing reverse proxy on the host)
 Use this if your staging server already has nginx/Traefik/Apache/Caddy handling ports `80/443`.
 
@@ -235,6 +239,9 @@ Use this if your staging server already has nginx/Traefik/Apache/Caddy handling 
 Notes:
 - If you start the `caddy` service while a host reverse proxy is already bound to `:80`/`:443`, you’ll get a “port already in use” error. In that case, do **not** run the `caddy` profile.
 - If you use a managed database (DigitalOcean, etc.), ensure the provider’s firewall/trusted sources allow the server’s public IP to connect.
+
+Optional (staging): use the helper script to split “build” from “up” (and fail early if templates don’t compile):
+- `sh scripts/deploy-staging.sh`
 
 ### Staging: deploy (built-in Caddy HTTPS)
 Use this if you do **not** have a reverse proxy already.

@@ -38,6 +38,7 @@ import {
   sendSignupConfirmation,
   sendSignupConfirmationWithKind
 } from './notifications.js';
+import { compileNunjucksTemplates } from './templates.js';
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -2083,6 +2084,18 @@ export async function buildApp(params: {
       requireAdminToken(req);
       await sql`select 1 as ok`.execute(params.db);
       return reply.send({ ok: true, db: 'ok' as const });
+    } catch (err: any) {
+      const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : 500;
+      return reply.code(statusCode).send({ ok: false, error: String(err?.message ?? err) });
+    }
+  });
+
+  app.get('/ops/templates/compile', async (req, reply) => {
+    try {
+      requireAdminToken(req);
+      const viewsDir = path.join(projectRoot, 'views');
+      const res = compileNunjucksTemplates({ viewsDir });
+      return reply.send({ ok: true, ...res });
     } catch (err: any) {
       const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : 500;
       return reply.code(statusCode).send({ ok: false, error: String(err?.message ?? err) });
