@@ -27,6 +27,10 @@ Optional profiles:
 Notes:
 - App logs are written to `logs/app.log`.
 - Volunteer “email me a link” requires SMTP to be configured in `.env.staging` (see `.env.staging.example`).
+- For a more reliable deploy flow (build → up → smoke test), use:
+  - `sh scripts/deploy-staging.sh`
+  - `sh scripts/deploy-staging-from-git.sh`
+  - `sh scripts/smoke.sh "$APP_URL"`
 
 Admin/Manager entrypoints:
 
