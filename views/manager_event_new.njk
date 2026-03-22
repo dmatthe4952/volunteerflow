@@ -21,6 +21,14 @@
         </select>
       </label>
       <label>
+        <span>Category</span>
+        <select name="category" required>
+          <option value="normal" selected>Normal</option>
+          <option value="featured">Featured</option>
+          <option value="understaffed">Understaffed</option>
+        </select>
+      </label>
+      <label>
         <span>Date</span>
         <input name="date" type="date" required />
       </label>
@@ -45,4 +53,3 @@
     </form>
   </div>
 {% endblock %}
-

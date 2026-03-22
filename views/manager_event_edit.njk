@@ -27,6 +27,27 @@
   {% endif %}
 
   <div class="panel">
+    <div class="title">Event image</div>
+    <img class="event-hero" src="{{ event.imagePath }}" alt="{{ event.title }}" style="margin-top:12px" />
+    {% if event.hasCustomImage %}
+      <form method="post" action="/manager/events/{{ event.id }}/image/clear" style="margin-top:12px">
+        <button class="btn danger" type="submit">Remove image</button>
+      </form>
+    {% else %}
+      <p class="muted" style="margin-top:8px">Using the default image.</p>
+    {% endif %}
+    <form class="form" method="post" action="/manager/events/{{ event.id }}/image" enctype="multipart/form-data">
+      <label>
+        <span>Upload image</span>
+        <input name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required />
+      </label>
+      <div class="actions">
+        <button class="btn primary" type="submit">{% if event.hasCustomImage %}Replace image{% else %}Upload image{% endif %}</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel">
     <form class="form" method="post" action="/manager/events/{{ event.id }}/edit">
       <label>
         <span>Title</span>
@@ -38,6 +59,14 @@
           {% for o in orgs %}
             <option value="{{ o.id }}" {% if o.id == event.organizationId %}selected{% endif %}>{{ o.name }}</option>
           {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Category</span>
+        <select name="category" required>
+          <option value="normal" {% if event.category == 'normal' %}selected{% endif %}>Normal</option>
+          <option value="featured" {% if event.category == 'featured' %}selected{% endif %}>Featured</option>
+          <option value="understaffed" {% if event.category == 'understaffed' %}selected{% endif %}>Understaffed</option>
         </select>
       </label>
       <div class="grid2">

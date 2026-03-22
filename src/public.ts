@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Kysely, sql } from 'kysely';
 import { config } from './config.js';
-import type { DB } from './db.js';
+import type { DB, EventCategory } from './db.js';
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -18,6 +18,14 @@ function parseDateInput(value: unknown): Date | null {
   }
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function dateKey(value: unknown): string {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const v = String(value ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const d = parseDateInput(v);
+  return d ? d.toISOString().slice(0, 10) : v;
 }
 
 function formatDate(value: unknown): string {
@@ -60,6 +68,27 @@ function formatTime(timeStr: string): string {
   return `${h12}:${String(mm).padStart(2, '0')} ${suffix}`;
 }
 
+function htmlToPlainText(html: string | null): string {
+  if (!html) return '';
+  const decodeOnce = (s: string) =>
+    s
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+  const decoded = decodeOnce(decodeOnce(String(html)));
+  return decoded
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p>/gi, '\n\n')
+    .replace(/<\/?p>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function eventUrl(slug: string | null, id: string): string {
   return `/events/${encodeURIComponent(slug ?? id)}`;
 }
@@ -74,24 +103,60 @@ function endOfDayPlusDaysUtc(date: Date, days: number): Date {
 }
 
 export async function listPublicEvents(db: Kysely<DB>) {
-  const rows = await db
+  return listPublicEventsFiltered(db, null);
+}
+
+export async function listPublicEventsFiltered(db: Kysely<DB>, category: EventCategory | null) {
+  let q = db
     .selectFrom('events')
     .innerJoin('organizations', 'organizations.id', 'events.organization_id')
     .where('events.is_published', '=', true)
-    .where('events.is_archived', '=', false)
+    .where('events.is_archived', '=', false);
+
+  if (category) {
+    q = q.where('events.category', '=', category);
+  }
+
+  const rows = await q
     .select([
       'events.id',
       'events.slug',
       'events.title',
+      'events.category',
       'events.start_date',
       'events.end_date',
       'events.location_name',
+      'events.description_html',
       'events.image_path',
       'events.cancelled_at',
       'organizations.name as organization_name',
       'organizations.slug as organization_slug',
       'organizations.primary_color as organization_primary_color'
     ])
+    .select(
+      sql<string>`
+        (
+          select s.start_time::text
+          from shifts s
+          where s.event_id = events.id
+            and s.is_active = true
+          order by s.shift_date asc, s.start_time asc
+          limit 1
+        )
+      `.as('first_shift_start_time')
+    )
+    .select(
+      sql<string>`
+        (
+          select s.end_time::text
+          from shifts s
+          where s.event_id = events.id
+            and s.is_active = true
+          order by s.shift_date asc, s.start_time asc
+          limit 1
+        )
+      `.as('first_shift_end_time')
+    )
     // Avoid join-induced overcount by using correlated subqueries.
     .select(
       sql<number>`
@@ -123,20 +188,29 @@ export async function listPublicEvents(db: Kysely<DB>) {
     const maxSlots = Number(r.max_slots ?? 0);
     const filledSlots = Number(r.filled_slots ?? 0);
     const openSlots = Math.max(0, maxSlots - filledSlots);
-    const dateRange =
-      r.start_date === r.end_date
-        ? formatDateShort(r.start_date)
-        : `${formatDateShort(r.start_date)} – ${formatDateShort(r.end_date)}`;
+    const sameDay = dateKey(r.start_date) === dateKey(r.end_date);
+    const dateRange = sameDay ? formatDateShort(r.start_date) : `${formatDateShort(r.start_date)} – ${formatDateShort(r.end_date)}`;
+
+    const timeLabelRaw = typeof (r as any).first_shift_start_time === 'string' ? (r as any).first_shift_start_time : '';
+    const endTimeRaw = typeof (r as any).first_shift_end_time === 'string' ? (r as any).first_shift_end_time : '';
+    const timeLabel =
+      timeLabelRaw && endTimeRaw ? `${formatTime(timeLabelRaw)} – ${formatTime(endTimeRaw)}` : timeLabelRaw ? formatTime(timeLabelRaw) : '';
+
+    const descriptionText = htmlToPlainText(r.description_html);
+    const descriptionShort = descriptionText.length > 220 ? `${descriptionText.slice(0, 217)}…` : descriptionText;
 
     return {
       id: r.id,
       slug: r.slug,
       url: eventUrl(r.slug, r.id),
       title: r.title,
+      category: ((r as any).category ?? 'normal') as EventCategory,
       organizationName: r.organization_name,
       dateRange,
+      timeLabel,
+      description: descriptionShort,
       locationName: r.location_name,
-      imagePath: r.image_path,
+      imagePath: r.image_path ?? '/event-images/default_volunteers.png',
       cancelledAt: r.cancelled_at,
       openSlots,
       isFull: openSlots === 0 && maxSlots > 0
@@ -236,7 +310,7 @@ export async function getPublicEventBySlugOrIdForViewer(db: Kysely<DB>, slugOrId
     descriptionHtml: event.description_html,
     locationName: event.location_name,
     locationMapUrl: event.location_map_url,
-    imagePath: event.image_path,
+    imagePath: event.image_path ?? '/event-images/default_volunteers.png',
     cancelledAt: event.cancelled_at,
     cancellationMessage: event.cancellation_message,
     dateRange:

@@ -4,6 +4,7 @@ import { createPgPool } from './pg.js';
 
 export type UserRole = 'super_admin' | 'event_manager';
 export type EventType = 'one_time' | 'recurring';
+export type EventCategory = 'featured' | 'normal' | 'understaffed';
 export type SignupStatus = 'active' | 'cancelled';
 
 export interface UsersTable {
@@ -37,6 +38,7 @@ export interface EventsTable {
   manager_id: string;
   slug: string | null;
   title: string;
+  category: EventCategory;
   description_html: string | null;
   location_name: string | null;
   location_map_url: string | null;

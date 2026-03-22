@@ -1,8 +1,10 @@
 {% extends "layout.njk" %}
 {% block content %}
-  <h1>Volunteer Opportunities</h1>
-  <p>Sign up for a shift—no account required.</p>
-
+  <div class="bb">
+    <h1>Make a Difference</h1>
+    <p class="half-back">Sign up for a shift -- no account required.</p>
+  </div>
+  <h3>Upcoming Volunteer Opportunities</h3>
   {% if events.length == 0 %}
     <div class="panel">
       <p class="muted">No published events yet.</p>
@@ -13,34 +15,33 @@
   {% else %}
     <div class="grid">
       {% for event in events %}
-        <a class="card" href="{{ event.url }}">
+        <a class="card {% if event.category and event.category != 'normal' %}cat-{{ event.category }}{% endif %}" href="{{ event.url }}">
+          <img class="card-img" src="{{ event.imagePath }}" alt="{{ event.title }}" />
           <div class="card-hd">
             <div class="title">{{ event.title }}</div>
-            <div class="meta">{{ event.organizationName }}</div>
           </div>
           <div class="card-bd">
-            <div class="row">
-              <span class="label">When</span>
-              <span class="value">{{ event.dateRange }}</span>
+            <div class="card-meta">
+              <div class="card-date">{{ event.dateRange }}</div>
+              {% if event.category == 'featured' %}
+                <span class="badge featured">Featured</span>
+              {% elseif event.category == 'understaffed' %}
+                <span class="badge danger">Understaffed</span>
+              {% endif %}
             </div>
-            {% if event.locationName %}
-              <div class="row">
-                <span class="label">Where</span>
-                <span class="value">{{ event.locationName }}</span>
+            {% if event.timeLabel %}
+              <div class="card-time" aria-label="Time">
+                <svg class="icon-clock" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <circle cx="12" cy="12" r="9"></circle>
+                  <path d="M12 7v6l4 2"></path>
+                </svg>
+                <span>{{ event.timeLabel }}</span>
               </div>
             {% endif %}
-            <div class="row">
-              <span class="label">Open slots</span>
-              <span class="value">
-                {% if event.cancelledAt %}
-                  <span class="badge danger">Cancelled</span>
-                {% elseif event.isFull %}
-                  <span class="badge danger">Full</span>
-                {% else %}
-                  <span class="badge ok">{{ event.openSlots }}</span>
-                {% endif %}
-              </span>
-            </div>
+            {% if event.description %}
+              <div class="card-desc">{{ event.description }}</div>
+            {% endif %}
+            <div class="card-cta" aria-hidden="true">View Shifts & Sign Up</div>
           </div>
         </a>
       {% endfor %}

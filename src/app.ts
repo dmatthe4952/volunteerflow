@@ -1,23 +1,26 @@
+import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import formbody from '@fastify/formbody';
+import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import statik from '@fastify/static';
 import fastifyView from '@fastify/view';
 import nunjucks from 'nunjucks';
 import { config } from './config.js';
-import type { DB } from './db.js';
+import type { DB, EventCategory } from './db.js';
 import { runMigrations } from './migrations.js';
 import {
   cancelSignup,
   createSignup,
   findActiveSignupByCancelToken,
   getPublicEventBySlugOrIdForViewer,
-  listPublicEvents,
+  listPublicEventsFiltered,
   listViewerActiveSignups,
   requestMySignupsToken,
   verifyMySignupsToken
@@ -53,6 +56,15 @@ function extractHexToken(input: string): string | null {
   return null;
 }
 
+function imageExtFromMime(mime: string): string | null {
+  const m = String(mime ?? '').toLowerCase().trim();
+  if (m === 'image/png') return 'png';
+  if (m === 'image/jpeg') return 'jpg';
+  if (m === 'image/webp') return 'webp';
+  if (m === 'image/gif') return 'gif';
+  return null;
+}
+
 function readSignedCookie(req: any, name: string): string | null {
   const raw = req?.cookies?.[name];
   if (typeof raw !== 'string' || !raw) return null;
@@ -85,6 +97,20 @@ export async function buildApp(params: {
 
   const app = Fastify({ logger, trustProxy: config.trustProxy });
   const projectRoot = params.projectRoot ?? process.cwd();
+  const eventImagesDir = path.join(projectRoot, 'uploads', 'event-images');
+  const addEventRequestsDir = path.join(projectRoot, 'uploads', 'add-event-requests');
+  fs.mkdirSync(eventImagesDir, { recursive: true });
+  if (config.env === 'development' || config.env === 'test') {
+    fs.mkdirSync(addEventRequestsDir, { recursive: true });
+  }
+  const defaultEventImageName = 'default_volunteers.png';
+  try {
+    const source = path.join(projectRoot, 'public', 'images', defaultEventImageName);
+    const target = path.join(eventImagesDir, defaultEventImageName);
+    if (!fs.existsSync(target) && fs.existsSync(source)) fs.copyFileSync(source, target);
+  } catch {
+    // ignore
+  }
 
   app.decorateRequest('currentUser', null);
 
@@ -169,6 +195,11 @@ export async function buildApp(params: {
   await app.register(rateLimit, { max: 200, timeWindow: '1 minute' });
   await app.register(cookie, { secret: config.sessionSecret });
   await app.register(formbody);
+  await app.register(multipart, {
+    limits: {
+      fileSize: 5 * 1024 * 1024
+    }
+  });
 
   app.addHook('preHandler', async (req) => {
     const raw = (req as any)?.cookies?.vf_sess;
@@ -186,6 +217,12 @@ export async function buildApp(params: {
   await app.register(statik, {
     root: path.join(projectRoot, 'public'),
     prefix: '/public/'
+  });
+
+  await app.register(statik, {
+    root: eventImagesDir,
+    prefix: '/event-images/',
+    decorateReply: false
   });
 
   await app.register(fastifyView, {
@@ -312,10 +349,108 @@ export async function buildApp(params: {
     return Number.isNaN(d.getTime()) ? String(value) : d.toISOString().slice(0, 10);
   }
 
-  app.get('/', async (_req, reply) => {
-    const events = await listPublicEvents(params.db);
+  app.get('/', async (req, reply) => {
+    const qs = req.query as Record<string, string | undefined>;
+    const showAll = qs.all === '1';
+    const raw = typeof qs.category === 'string' ? qs.category : '';
+    const category: EventCategory | null = showAll
+      ? null
+      : ['featured', 'normal', 'understaffed'].includes(raw)
+        ? (raw as EventCategory)
+        : ('featured' as EventCategory);
+
+    const events = await listPublicEventsFiltered(params.db, showAll ? null : category);
     const showSeedHint = config.env === 'development' || config.env === 'test';
-    return render(reply, 'index.njk', { events, showSeedHint });
+    return render(reply, 'index.njk', { events, showSeedHint, navAddEventOnly: true });
+  });
+
+  app.get('/add-event', async (req, reply) => {
+    const qs = req.query as Record<string, string | undefined>;
+    const flash =
+      qs.ok === '1'
+        ? { type: 'ok' as const, message: 'Thanks! We received your event request.' }
+        : typeof qs.err === 'string'
+          ? { type: 'err' as const, message: qs.err }
+          : null;
+
+    return render(reply, 'add_event.njk', {
+      flash,
+      values: { title: '', date: '', time: '', description: '', organization: '', organizer: '' }
+    });
+  });
+
+  app.get('/sign-in', async (_req, reply) => {
+    return render(reply, 'sign_in.njk', {});
+  });
+
+  app.post('/add-event', async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const title = String(body.title ?? '').trim();
+    const date = String(body.date ?? '').trim();
+    const time = String(body.time ?? '').trim();
+    const description = String(body.description ?? '').trim();
+    const organization = String(body.organization ?? '').trim();
+    const organizer = String(body.organizer ?? '').trim();
+
+    try {
+      if (!title || title.length > 200) throw new Error('Title is required (max 200 characters).');
+      parseDateOnly(date);
+      parseTime(time);
+      if (description.length > 5000) throw new Error('Description is too long (max 5000 characters).');
+      if (!organization || organization.length > 200) throw new Error('Organization is required (max 200 characters).');
+      if (!organizer || organizer.length > 200) throw new Error('Organizer is required (max 200 characters).');
+
+      const submittedAt = new Date().toISOString();
+      const subject = `Add Event request: ${title}`;
+      const bodyText = [
+        `A new event was requested via the public Add Event form.`,
+        ``,
+        `Title: ${title}`,
+        `Date: ${date}`,
+        `Time: ${time}`,
+        `Organization: ${organization}`,
+        `Organizer: ${organizer}`,
+        ``,
+        `Description:`,
+        description || '(none)',
+        ``,
+        `Submitted at: ${submittedAt}`
+      ].join('\n');
+
+      if (config.env === 'development' || config.env === 'test') {
+        try {
+          const safe = slugify(title) || 'event';
+          const name = `${Date.now()}-${safe}-${crypto.randomBytes(4).toString('hex')}.txt`;
+          fs.writeFileSync(path.join(addEventRequestsDir, name), `Subject: ${subject}\n\n${bodyText}\n`, 'utf8');
+        } catch (err: any) {
+          req.log.warn({ err }, 'failed to write add-event request to disk');
+        }
+      }
+
+      const admins = await params.db
+        .selectFrom('users')
+        .select(['email'])
+        .where('role', '=', 'super_admin')
+        .where('is_active', '=', true)
+        .orderBy('created_at', 'asc')
+        .execute();
+      const emails = admins.map((a) => a.email).filter(Boolean);
+      if (emails.length === 0) {
+        req.log.warn({ title, organization, organizer }, 'add-event submitted but no active super_admin users found');
+      } else {
+        for (const to of emails) {
+          await sendEmail({ to, subject, text: bodyText });
+        }
+      }
+
+      req.log.info({ title, date, time, organization, organizer }, 'add-event submitted');
+      return reply.code(303).redirect('/add-event?ok=1');
+    } catch (err: any) {
+      return render(reply, 'add_event.njk', {
+        flash: { type: 'err', message: String(err?.message ?? err) },
+        values: { title, date, time, description, organization, organizer }
+      });
+    }
   });
 
   app.get('/events/:slugOrId', async (req, reply) => {
@@ -1249,6 +1384,7 @@ export async function buildApp(params: {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const title = String(body.title ?? '').trim();
     const organizationId = String(body.organizationId ?? '').trim();
+    const category = String(body.category ?? '').trim();
     const date = String(body.date ?? '').trim();
     const description = String(body.description ?? '');
     const locationName = String(body.locationName ?? '').trim();
@@ -1257,6 +1393,7 @@ export async function buildApp(params: {
     try {
       if (!title || title.length > 200) throw new Error('Invalid title.');
       if (!organizationId) throw new Error('Organization is required.');
+      if (!['normal', 'featured', 'understaffed'].includes(category)) throw new Error('Invalid category.');
       const startDate = parseDateOnly(date);
       const slug = await uniqueEventSlug(title);
 
@@ -1267,6 +1404,7 @@ export async function buildApp(params: {
           manager_id: currentUser.id,
           slug,
           title,
+          category: category as EventCategory,
           description_html: descriptionTextToHtml(description),
           location_name: locationName || null,
           location_map_url: locationMapUrl || null,
@@ -1300,11 +1438,13 @@ export async function buildApp(params: {
         'id',
         'title',
         'organization_id',
+        'category',
         'start_date',
         'end_date',
         'description_html',
         'location_name',
         'location_map_url',
+        'image_path',
         'is_published',
         'is_archived',
         'cancelled_at',
@@ -1353,11 +1493,14 @@ export async function buildApp(params: {
         id: event.id,
         title: event.title,
         organizationId: event.organization_id,
+        category: event.category ?? 'normal',
         startDate: toDateOnly(event.start_date),
         endDate: toDateOnly(event.end_date),
         description,
         locationName: event.location_name ?? '',
         locationMapUrl: event.location_map_url ?? '',
+        imagePath: event.image_path ?? '/event-images/default_volunteers.png',
+        hasCustomImage: Boolean(event.image_path),
         isPublished: event.is_published,
         isArchived: event.is_archived,
         cancelledAt: event.cancelled_at,
@@ -1391,6 +1534,7 @@ export async function buildApp(params: {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const title = String(body.title ?? '').trim();
     const organizationId = String(body.organizationId ?? '').trim();
+    const category = String(body.category ?? '').trim();
     const startDate = String(body.startDate ?? '').trim();
     const endDate = String(body.endDate ?? '').trim();
     const description = String(body.description ?? '');
@@ -1400,6 +1544,8 @@ export async function buildApp(params: {
     try {
       if (!title || title.length > 200) throw new Error('Invalid title.');
       if (!organizationId) throw new Error('Organization is required.');
+      if (!['normal', 'featured', 'understaffed'].includes(category)) throw new Error('Invalid category.');
+      const cat = category as EventCategory;
       const sd = parseDateOnly(startDate);
       const ed = parseDateOnly(endDate);
 
@@ -1408,6 +1554,7 @@ export async function buildApp(params: {
         .set({
           title,
           organization_id: organizationId,
+          category: cat,
           start_date: sd,
           end_date: ed,
           description_html: descriptionTextToHtml(description),
@@ -1422,6 +1569,85 @@ export async function buildApp(params: {
     } catch (err: any) {
       return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);
     }
+  });
+
+  app.post('/manager/events/:id/image', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    try {
+      const event = await params.db
+        .selectFrom('events')
+        .select(['id', 'image_path'])
+        .where('id', '=', id)
+        .where('manager_id', '=', currentUser.id)
+        .executeTakeFirst();
+      if (!event) return reply.code(404).view('not_found.njk', { message: 'Event not found.' });
+
+      const filePart = await (req as any).file();
+      if (!filePart?.file) throw new Error('Image file is required.');
+      const ext = imageExtFromMime(String(filePart.mimetype ?? ''));
+      if (!ext) throw new Error('Unsupported image type. Please upload a PNG, JPG, WebP, or GIF.');
+
+      const name = `event-${id}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
+      const target = path.join(eventImagesDir, name);
+      await pipeline(filePart.file, fs.createWriteStream(target, { flags: 'wx' }));
+
+      await params.db
+        .updateTable('events')
+        .set({ image_path: `/event-images/${name}` })
+        .where('id', '=', id)
+        .where('manager_id', '=', currentUser.id)
+        .execute();
+
+      const oldPath = event.image_path;
+      if (typeof oldPath === 'string' && oldPath.startsWith('/event-images/') && oldPath !== `/event-images/${name}`) {
+        const oldName = oldPath.slice('/event-images/'.length);
+        if (oldName) {
+          try {
+            fs.unlinkSync(path.join(eventImagesDir, oldName));
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Event image updated.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/manager/events/:id/image/clear', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    const event = await params.db
+      .selectFrom('events')
+      .select(['id', 'image_path'])
+      .where('id', '=', id)
+      .where('manager_id', '=', currentUser.id)
+      .executeTakeFirst();
+    if (!event) return reply.code(404).view('not_found.njk', { message: 'Event not found.' });
+
+    await params.db
+      .updateTable('events')
+      .set({ image_path: null })
+      .where('id', '=', id)
+      .where('manager_id', '=', currentUser.id)
+      .execute();
+
+    const oldPath = event.image_path;
+    if (typeof oldPath === 'string' && oldPath.startsWith('/event-images/')) {
+      const oldName = oldPath.slice('/event-images/'.length);
+      if (oldName) {
+        try {
+          fs.unlinkSync(path.join(eventImagesDir, oldName));
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Event image removed.')}`);
   });
 
   app.post('/manager/events/:id/publish', async (req, reply) => {

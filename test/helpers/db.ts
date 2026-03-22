@@ -84,6 +84,7 @@ export async function seedBasicEvent(db: Kysely<DB>) {
       manager_id: manager.id,
       slug,
       title,
+      category: 'normal',
       description_html: '<p>Test event.</p>',
       location_name: 'Somewhere',
       location_map_url: 'https://maps.example.com',

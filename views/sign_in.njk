@@ -1,0 +1,18 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <div class="crumbs">
+    <a href="/?all=1">All Volunteer Events</a>
+    <span class="sep">/</span>
+    <span>App Sign In</span>
+  </div>
+
+  <h1>App Sign In</h1>
+  <p class="muted">Choose the area you need to access.</p>
+
+  <div class="panel">
+    <div class="actions">
+      <a class="btn primary" href="/manager/login">Manager Sign In</a>
+      <a class="btn" href="/admin/login">Admin Sign In</a>
+    </div>
+  </div>
+{% endblock %}

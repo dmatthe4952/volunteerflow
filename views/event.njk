@@ -7,6 +7,9 @@
   </div>
 
   <div class="panel">
+    {% if event.imagePath %}
+      <img class="event-hero" src="{{ event.imagePath }}" alt="{{ event.title }}" />
+    {% endif %}
     <h1>{{ event.title }}</h1>
     <div class="meta">{{ event.organizationName }} • {{ event.dateRange }}</div>
 

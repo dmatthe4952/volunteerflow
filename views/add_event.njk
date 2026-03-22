@@ -1,0 +1,53 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <div class="crumbs">
+    <a href="/?all=1">All Volunteer Events</a>
+    <span class="sep">/</span>
+    <span>Add Event</span>
+  </div>
+
+  <h1>Add Event</h1>
+  <p class="muted">Send us the basics and we’ll follow up.</p>
+  <p class="muted"><a href="/sign-in">App Sign In</a></p>
+
+  {% if flash %}
+    <div class="flash {{ flash.type }}"><div>{{ flash.message }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <form class="form" method="post" action="/add-event">
+      <label>
+        <span>Title</span>
+        <input name="title" required maxlength="200" value="{{ values.title }}" />
+      </label>
+      <div class="grid2">
+        <label>
+          <span>Date</span>
+          <input name="date" type="date" required value="{{ values.date }}" />
+        </label>
+        <label>
+          <span>Time</span>
+          <input name="time" type="time" required value="{{ values.time }}" />
+        </label>
+      </div>
+      <label>
+        <span>Description</span>
+        <textarea name="description" rows="6" maxlength="5000" placeholder="What volunteers will do, requirements, etc…">{{ values.description }}</textarea>
+      </label>
+      <div class="grid2">
+        <label>
+          <span>Organization</span>
+          <input name="organization" required maxlength="200" value="{{ values.organization }}" />
+        </label>
+        <label>
+          <span>Organizer</span>
+          <input name="organizer" required maxlength="200" value="{{ values.organizer }}" />
+        </label>
+      </div>
+      <div class="actions">
+        <button class="btn primary" type="submit">Submit</button>
+        <a class="btn" href="/">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}
