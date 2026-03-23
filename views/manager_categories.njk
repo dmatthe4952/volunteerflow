@@ -1,0 +1,80 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>Categories</h1>
+  <div class="crumbs">
+    <a href="/manager/dashboard">Manager dashboard</a>
+    <span class="sep">/</span>
+    <span>Categories</span>
+  </div>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+  {% if ok %}
+    <div class="flash ok"><div>{{ ok }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="title">Add category</div>
+    <form class="form" method="post" action="/manager/categories">
+      <div class="grid2">
+        <label>
+          <span>Name</span>
+          <input name="label" required maxlength="80" placeholder="e.g. Food Pantry" />
+        </label>
+        <label>
+          <span>Color</span>
+          <input name="color" type="color" value="#0f766e" required />
+        </label>
+      </div>
+      <label>
+        <span>Slug (optional)</span>
+        <input name="slug" maxlength="60" placeholder="e.g. food-pantry (auto if blank)" />
+      </label>
+      <div class="actions">
+        <button class="btn primary" type="submit">Add</button>
+        <a class="btn" href="/manager/dashboard">Done</a>
+      </div>
+    </form>
+  </div>
+
+  <h2 style="margin-top:18px">Existing</h2>
+  {% if not categories or categories.length == 0 %}
+    <div class="panel"><p class="muted">No categories yet.</p></div>
+  {% else %}
+    <div class="stack">
+      {% for c in categories %}
+        <div class="panel">
+          <div class="shift-top">
+            <div>
+              <div class="title">{{ c.label }}</div>
+              <div class="meta">Slug: <code>{{ c.slug }}</code>{% if c.isSystem %} • System{% endif %}</div>
+            </div>
+            <div class="right">
+              <span class="badge badge-cat" style="--cat-rgb: {{ c.colorRgb }}; --cat-hex: {{ c.color }};">{{ c.label }}</span>
+            </div>
+          </div>
+
+          <form class="form" method="post" action="/manager/categories/{{ c.id }}">
+            <div class="grid2">
+              <label>
+                <span>Name</span>
+                <input name="label" required maxlength="80" value="{{ c.label }}" />
+              </label>
+              <label>
+                <span>Color</span>
+                <input name="color" type="color" value="{{ c.color }}" required />
+              </label>
+            </div>
+            <div class="actions">
+              <button class="btn primary" type="submit">Save</button>
+              {% if not c.isSystem %}
+                <button class="btn danger" formmethod="post" formaction="/manager/categories/{{ c.id }}/delete" type="submit">Delete</button>
+              {% endif %}
+            </div>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}

@@ -4,7 +4,7 @@ import { createPgPool } from './pg.js';
 
 export type UserRole = 'super_admin' | 'event_manager';
 export type EventType = 'one_time' | 'recurring';
-export type EventCategory = 'featured' | 'normal' | 'understaffed';
+export type EventCategory = string; // event_categories.slug
 export type SignupStatus = 'active' | 'cancelled';
 
 export interface UsersTable {
@@ -133,10 +133,23 @@ export interface NotificationSendsTable {
   sent_at: string | null;
 }
 
+export interface EventCategoriesTable {
+  id: Generated<string>;
+  slug: string;
+  label: string;
+  color: string;
+  is_system: boolean;
+  is_active: boolean;
+  sort_order: number;
+  created_at: Generated<string>;
+  updated_at: Generated<string>;
+}
+
 export interface DB {
   users: UsersTable;
   organizations: OrganizationsTable;
   events: EventsTable;
+  event_categories: EventCategoriesTable;
   shifts: ShiftsTable;
   role_templates: RoleTemplatesTable;
   signups: SignupsTable;

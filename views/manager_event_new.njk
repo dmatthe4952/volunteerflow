@@ -23,9 +23,9 @@
       <label>
         <span>Category</span>
         <select name="category" required>
-          <option value="normal" selected>Normal</option>
-          <option value="featured">Featured</option>
-          <option value="understaffed">Understaffed</option>
+          {% for c in categories %}
+            <option value="{{ c.slug }}" {% if c.slug == 'normal' %}selected{% endif %}>{{ c.label }}</option>
+          {% endfor %}
         </select>
       </label>
       <label>

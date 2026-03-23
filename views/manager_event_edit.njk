@@ -64,9 +64,9 @@
       <label>
         <span>Category</span>
         <select name="category" required>
-          <option value="normal" {% if event.category == 'normal' %}selected{% endif %}>Normal</option>
-          <option value="featured" {% if event.category == 'featured' %}selected{% endif %}>Featured</option>
-          <option value="understaffed" {% if event.category == 'understaffed' %}selected{% endif %}>Understaffed</option>
+          {% for c in categories %}
+            <option value="{{ c.slug }}" {% if event.category == c.slug %}selected{% endif %}>{{ c.label }}</option>
+          {% endfor %}
         </select>
       </label>
       <div class="grid2">

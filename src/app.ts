@@ -15,6 +15,7 @@ import nunjucks from 'nunjucks';
 import { config } from './config.js';
 import type { DB, EventCategory } from './db.js';
 import { runMigrations } from './migrations.js';
+import { hexToRgbTriplet, listEventCategories } from './event_categories.js';
 import {
   cancelSignup,
   createSignup,
@@ -239,9 +240,20 @@ export async function buildApp(params: {
     noCache: config.env === 'development'
   });
 
-  function render(reply: any, template: string, data: any) {
+  async function render(reply: any, template: string, data: any) {
     const currentUser = (reply.request as any).currentUser ?? null;
-    return reply.view(template, { ...data, currentUser });
+    const navCategoriesRaw =
+      Array.isArray(data?.navCategories) && data.navCategories.length > 0 ? null : await listEventCategories(params.db);
+    const navCategories =
+      Array.isArray(data?.navCategories) && data.navCategories.length > 0
+        ? data.navCategories
+        : navCategoriesRaw!.map((c) => ({
+            slug: c.slug,
+            label: c.label,
+            colorHex: c.color,
+            colorRgb: hexToRgbTriplet(c.color) ?? '15, 118, 110'
+          }));
+    return reply.view(template, { ...data, currentUser, navCategories });
   }
 
   function requireRole(req: any, role: 'super_admin' | 'event_manager') {
@@ -352,16 +364,21 @@ export async function buildApp(params: {
   app.get('/', async (req, reply) => {
     const qs = req.query as Record<string, string | undefined>;
     const showAll = qs.all === '1';
-    const raw = typeof qs.category === 'string' ? qs.category : '';
-    const category: EventCategory | null = showAll
-      ? null
-      : ['featured', 'normal', 'understaffed'].includes(raw)
-        ? (raw as EventCategory)
-        : ('featured' as EventCategory);
+    const raw = typeof qs.category === 'string' ? qs.category.trim() : '';
+    const cats = await listEventCategories(params.db);
+    const navCategories = cats.map((c) => ({
+      slug: c.slug,
+      label: c.label,
+      colorHex: c.color,
+      colorRgb: hexToRgbTriplet(c.color) ?? '15, 118, 110'
+    }));
+
+    const allowed = new Set(cats.filter((c) => c.isActive).map((c) => c.slug));
+    const category: EventCategory | null = showAll ? null : raw && allowed.has(raw) ? raw : 'featured';
 
     const events = await listPublicEventsFiltered(params.db, showAll ? null : category);
     const showSeedHint = config.env === 'development' || config.env === 'test';
-    return render(reply, 'index.njk', { events, showSeedHint, navAddEventOnly: true });
+    return render(reply, 'index.njk', { events, showSeedHint, navAddEventOnly: true, navCategories });
   });
 
   app.get('/add-event', async (req, reply) => {
@@ -1117,6 +1134,92 @@ export async function buildApp(params: {
     });
   });
 
+  // Manager: Event categories
+  app.get('/manager/categories', async (req, reply) => {
+    requireRole(req, 'event_manager');
+    const qs = req.query as Record<string, string | undefined>;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+
+    const categories = (await listEventCategories(params.db, { includeInactive: true })).map((c) => ({
+      ...c,
+      colorRgb: hexToRgbTriplet(c.color) ?? '15, 118, 110'
+    }));
+    return render(reply, 'manager_categories.njk', {
+      error,
+      ok,
+      categories
+    });
+  });
+
+  app.post('/manager/categories', async (req, reply) => {
+    requireRole(req, 'event_manager');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const label = String(body.label ?? '').trim();
+    const slugRaw = String(body.slug ?? '').trim();
+    const slug = slugRaw ? slugify(slugRaw) : slugify(label);
+    const color = String(body.color ?? '').trim();
+
+    try {
+      if (!label || label.length > 80) throw new Error('Invalid category name.');
+      if (!slug || slug.length > 60 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new Error('Invalid slug.');
+      if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error('Invalid color (use #RRGGBB).');
+
+      await params.db
+        .insertInto('event_categories')
+        .values({
+          slug,
+          label,
+          color,
+          is_system: false,
+          is_active: true,
+          sort_order: 100
+        })
+        .execute();
+
+      return reply.code(303).redirect(`/manager/categories?ok=${encodeURIComponent('Category added.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/categories?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/manager/categories/:id', async (req, reply) => {
+    requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const label = String(body.label ?? '').trim();
+    const color = String(body.color ?? '').trim();
+
+    try {
+      if (!label || label.length > 80) throw new Error('Invalid category name.');
+      if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error('Invalid color (use #RRGGBB).');
+
+      await params.db.updateTable('event_categories').set({ label, color }).where('id', '=', id).execute();
+      return reply.code(303).redirect(`/manager/categories?ok=${encodeURIComponent('Category updated.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/categories?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/manager/categories/:id/delete', async (req, reply) => {
+    requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    try {
+      const cat = await params.db
+        .selectFrom('event_categories')
+        .select(['id', 'slug', 'is_system'])
+        .where('id', '=', id)
+        .executeTakeFirst();
+      if (!cat) throw new Error('Category not found.');
+      if (cat.is_system) throw new Error('System categories cannot be deleted.');
+
+      await params.db.deleteFrom('event_categories').where('id', '=', id).execute();
+      return reply.code(303).redirect(`/manager/categories?ok=${encodeURIComponent('Category deleted.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/categories?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
   // Admin organizations (needed before managers can create events)
   app.get('/admin/organizations', async (req, reply) => {
     requireRole(req, 'super_admin');
@@ -1376,7 +1479,8 @@ export async function buildApp(params: {
   app.get('/manager/events/new', async (req, reply) => {
     requireRole(req, 'event_manager');
     const orgs = await params.db.selectFrom('organizations').select(['id', 'name']).orderBy('name', 'asc').execute();
-    return render(reply, 'manager_event_new.njk', { orgs });
+    const categories = await listEventCategories(params.db);
+    return render(reply, 'manager_event_new.njk', { orgs, categories });
   });
 
   app.post('/manager/events/new', async (req, reply) => {
@@ -1393,7 +1497,9 @@ export async function buildApp(params: {
     try {
       if (!title || title.length > 200) throw new Error('Invalid title.');
       if (!organizationId) throw new Error('Organization is required.');
-      if (!['normal', 'featured', 'understaffed'].includes(category)) throw new Error('Invalid category.');
+      const cats = await listEventCategories(params.db);
+      const allowed = new Set(cats.map((c) => c.slug));
+      const cat = category && allowed.has(category) ? category : 'normal';
       const startDate = parseDateOnly(date);
       const slug = await uniqueEventSlug(title);
 
@@ -1404,7 +1510,7 @@ export async function buildApp(params: {
           manager_id: currentUser.id,
           slug,
           title,
-          category: category as EventCategory,
+          category: cat as EventCategory,
           description_html: descriptionTextToHtml(description),
           location_name: locationName || null,
           location_map_url: locationMapUrl || null,
@@ -1422,7 +1528,8 @@ export async function buildApp(params: {
       return reply.code(303).redirect(`/manager/events/${inserted.id}/edit`);
     } catch (err: any) {
       const orgs = await params.db.selectFrom('organizations').select(['id', 'name']).orderBy('name', 'asc').execute();
-      return render(reply, 'manager_event_new.njk', { orgs, error: String(err?.message ?? err) });
+      const categories = await listEventCategories(params.db);
+      return render(reply, 'manager_event_new.njk', { orgs, categories, error: String(err?.message ?? err) });
     }
   });
 
@@ -1482,6 +1589,8 @@ export async function buildApp(params: {
       .orderBy('role_name', 'asc')
       .execute();
 
+    const categories = await listEventCategories(params.db);
+
     const description = unescapeHtml(
       (event.description_html ?? '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p>/gi, '\n\n').replace(/<\/?p>/gi, '')
     );
@@ -1489,6 +1598,7 @@ export async function buildApp(params: {
       error,
       ok,
       orgs,
+      categories,
       event: {
         id: event.id,
         title: event.title,
@@ -1544,8 +1654,9 @@ export async function buildApp(params: {
     try {
       if (!title || title.length > 200) throw new Error('Invalid title.');
       if (!organizationId) throw new Error('Organization is required.');
-      if (!['normal', 'featured', 'understaffed'].includes(category)) throw new Error('Invalid category.');
-      const cat = category as EventCategory;
+      const cats = await listEventCategories(params.db);
+      const allowed = new Set(cats.map((c) => c.slug));
+      const cat = (category && allowed.has(category) ? category : 'normal') as EventCategory;
       const sd = parseDateOnly(startDate);
       const ed = parseDateOnly(endDate);
 

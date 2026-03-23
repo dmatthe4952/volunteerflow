@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Kysely, sql } from 'kysely';
 import { config } from './config.js';
 import type { DB, EventCategory } from './db.js';
+import { toBadgeFromRow } from './event_categories.js';
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -110,6 +111,7 @@ export async function listPublicEventsFiltered(db: Kysely<DB>, category: EventCa
   let q = db
     .selectFrom('events')
     .innerJoin('organizations', 'organizations.id', 'events.organization_id')
+    .leftJoin('event_categories', 'event_categories.slug', 'events.category')
     .where('events.is_published', '=', true)
     .where('events.is_archived', '=', false);
 
@@ -123,6 +125,8 @@ export async function listPublicEventsFiltered(db: Kysely<DB>, category: EventCa
       'events.slug',
       'events.title',
       'events.category',
+      'event_categories.label as category_label',
+      'event_categories.color as category_color',
       'events.start_date',
       'events.end_date',
       'events.location_name',
@@ -204,7 +208,11 @@ export async function listPublicEventsFiltered(db: Kysely<DB>, category: EventCa
       slug: r.slug,
       url: eventUrl(r.slug, r.id),
       title: r.title,
-      category: ((r as any).category ?? 'normal') as EventCategory,
+      category: toBadgeFromRow({
+        slug: ((r as any).category ?? 'normal') as string,
+        label: (r as any).category_label ?? null,
+        color: (r as any).category_color ?? null
+      }),
       organizationName: r.organization_name,
       dateRange,
       timeLabel,

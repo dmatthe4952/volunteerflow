@@ -15,7 +15,7 @@
   {% else %}
     <div class="grid">
       {% for event in events %}
-        <a class="card {% if event.category and event.category != 'normal' %}cat-{{ event.category }}{% endif %}" href="{{ event.url }}">
+        <a class="card" data-cat="{{ event.category.slug }}" style="--cat-rgb: {{ event.category.colorRgb }}; --cat-hex: {{ event.category.colorHex }};" href="{{ event.url }}">
           <img class="card-img" src="{{ event.imagePath }}" alt="{{ event.title }}" />
           <div class="card-hd">
             <div class="title">{{ event.title }}</div>
@@ -23,11 +23,7 @@
           <div class="card-bd">
             <div class="card-meta">
               <div class="card-date">{{ event.dateRange }}</div>
-              {% if event.category == 'featured' %}
-                <span class="badge featured">Featured</span>
-              {% elseif event.category == 'understaffed' %}
-                <span class="badge danger">Understaffed</span>
-              {% endif %}
+              <span class="badge badge-cat" style="--cat-rgb: {{ event.category.colorRgb }}; --cat-hex: {{ event.category.colorHex }};">{{ event.category.label }}</span>
             </div>
             {% if event.timeLabel %}
               <div class="card-time" aria-label="Time">

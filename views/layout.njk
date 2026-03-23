@@ -14,7 +14,29 @@
             <img class="brand-logo" src="/public/images/official_logo.png" alt="VolunteerFlow" />
           </a>
           <div class="nav-links">
-            <a href="/?all=1">All Volunteer Events</a>
+            {% if navCategories %}
+              <div class="nav-dd">
+                <a class="nav-dd-trigger" href="/?all=1" aria-label="Filter events by category">
+                  <svg class="icon-funnel" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M3 5h18l-7 8v5l-4 2v-7z"></path>
+                  </svg>
+                  <span>All Volunteer Events</span>
+                  <svg class="icon-caret" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M7 10l5 5 5-5"></path>
+                  </svg>
+                </a>
+                <div class="nav-dd-menu" role="menu" aria-label="Event categories">
+                  <a class="nav-dd-item" role="menuitem" href="/?all=1">All Events</a>
+                  {% for c in navCategories %}
+                    <a class="nav-dd-item" role="menuitem" href="/?category={{ c.slug }}">
+                      <span class="badge badge-cat" style="--cat-rgb: {{ c.colorRgb }}; --cat-hex: {{ c.colorHex }};">{{ c.label }}</span>
+                    </a>
+                  {% endfor %}
+                </div>
+              </div>
+            {% else %}
+              <a href="/?all=1">All Volunteer Events</a>
+            {% endif %}
             <a href="/my">Check for Previous Signups</a>
             {% if currentUser %}
               {% if currentUser.role == 'super_admin' %}
