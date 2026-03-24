@@ -400,6 +400,13 @@ export async function buildApp(params: {
     return render(reply, 'sign_in.njk', {});
   });
 
+  app.get('/forgot-password', async (req, reply) => {
+    const qs = req.query as Record<string, string | undefined>;
+    const raw = String(qs.role ?? '').trim().toLowerCase();
+    const role = raw === 'admin' ? 'admin' : raw === 'manager' ? 'manager' : '';
+    return render(reply, 'forgot_password.njk', { role });
+  });
+
   app.post('/add-event', async (req, reply) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const title = String(body.title ?? '').trim();
