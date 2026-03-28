@@ -21,8 +21,18 @@ services:
       SESSION_SECRET: dev-only-change-me
       ADMIN_TOKEN: dev-ops-change-me
       APP_LOG_FILE: /app/logs/app.log
+      # SMTP (optional): set these in local `.env` to enable real email in dev.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-VolunteerFlow}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
     ports:
       - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./:/app
       - /app/node_modules

@@ -448,13 +448,15 @@ export async function createSignup(params: {
         .executeTakeFirstOrThrow();
 
       return { signupId: inserted.id, token: rawToken };
-    } catch (err: any) {
-      if (err?.code === '23505') {
-        throw new Error("You're already signed up for this shift with that email address.");
-      }
-      throw err;
-    }
-  });
+	    } catch (err: any) {
+	      if (err?.code === '23505') {
+	        throw new Error(
+	          'That email address is already signed up for this shift. If this is you, use the “My Signups” link to view or cancel your signup.'
+	        );
+	      }
+	      throw err;
+	    }
+	  });
 
   return res;
 }
@@ -585,25 +587,33 @@ export async function verifyMySignupsToken(db: Kysely<DB>, rawToken: string) {
   if (!/^[a-f0-9]{64}$/.test(rawToken)) return null;
   const tokenHmac = crypto.createHmac('sha256', config.sessionSecret).update(rawToken).digest();
 
+  const now = new Date();
+  const nowIso = now.toISOString();
+
+  // Consume token on first successful verification.
+  // This makes email links truly one-time (a second request will fail).
+  const consumed = await db
+    .updateTable('volunteer_email_tokens')
+    .set({ used_at: nowIso, expires_at: nowIso })
+    .where('token_hmac', '=', tokenHmac)
+    .where('used_at', 'is', null)
+    .where('expires_at', '>', nowIso)
+    .returning(['email'])
+    .executeTakeFirst();
+
+  if (consumed) return { expired: false as const, email: consumed.email as string };
+
+  // If we didn't consume a row, figure out whether it's missing vs. expired/used.
   const row = await db
     .selectFrom('volunteer_email_tokens')
-    .select(['email', 'expires_at', 'used_at'])
+    .select(['expires_at', 'used_at'])
     .where('token_hmac', '=', tokenHmac)
     .executeTakeFirst();
 
   if (!row) return null;
-  if (Date.parse(row.expires_at) < Date.now()) return { expired: true as const };
+  if (row.used_at) return { expired: true as const };
+  if (Date.parse(row.expires_at) <= now.getTime()) return { expired: true as const };
 
-  // UX/security tradeoff: allow re-use until expiry (especially important for one-time views on shared devices),
-  // but record first-use time for audit.
-  if (!row.used_at) {
-    await db
-      .updateTable('volunteer_email_tokens')
-      .set({ used_at: new Date().toISOString() })
-      .where('token_hmac', '=', tokenHmac)
-      .where('used_at', 'is', null)
-      .execute();
-  }
-
-  return { expired: false as const, email: row.email as string };
+  // Token exists and appears valid, but we couldn't consume it (race or clock skew).
+  return { expired: true as const };
 }

@@ -65,7 +65,7 @@ describe.skipIf(!DATABASE_URL)('public volunteer flows', () => {
     expect(Number(sends?.c ?? 0)).toBe(1);
   });
 
-  test('my-signups token can be used repeatedly until expiry (one-time view)', async () => {
+  test('my-signups token is one-time (second use fails)', async () => {
     const { eventSlug, shiftId } = await seedBasicEvent(db);
     await app.inject({
       method: 'POST',
@@ -90,7 +90,7 @@ describe.skipIf(!DATABASE_URL)('public volunteer flows', () => {
     expect(resView1.body).toContain('Packing');
 
     const resView2 = await app.inject({ method: 'GET', url: `/my/verify/${token}?remember=0` });
-    expect(resView2.statusCode).toBe(200);
+    expect(resView2.statusCode).toBe(410);
   });
 
   test('clearing device removes cookie but user can paste link and view (no re-signup needed)', async () => {

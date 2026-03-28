@@ -6,14 +6,12 @@
       <div class="flash err"><div>{{ error }}</div></div>
     {% else %}
       <p class="muted">If an account exists for <strong>{{ email }}</strong>, we sent a sign-in link.</p>
-      {% if verifyUrlRemember %}
+      {% if verifyUrlOneTime %}
         <p class="muted">Dev shortcut (no SMTP configured):</p>
         <div class="actions" style="margin-top:10px">
-          <a class="btn primary" href="{{ verifyUrlRemember }}">Remember this device</a>
-          <a class="btn" href="{{ verifyUrlOneTime }}">One-time view</a>
+          <a class="btn primary" href="{{ verifyUrlOneTime }}">Click to view signups</a>
         </div>
-        <p class="muted" style="margin-top:10px"><code>{{ verifyUrlRemember }}</code></p>
-        <p class="muted"><code>{{ verifyUrlOneTime }}</code></p>
+        <p class="muted" style="margin-top:10px"><code>{{ verifyUrlOneTime }}</code></p>
       {% elseif not error %}
         <p class="muted">Email delivery is not configured yet.</p>
       {% endif %}

@@ -20,31 +20,15 @@
         {% endif %}
       </div>
     </form>
-  </div>
+	  </div>
 
-  <div class="panel" style="margin-top:12px">
-    <p class="muted">Already have the link? Paste it here.</p>
-    <form class="form" method="post" action="/my/verify">
-      <label>
-        <span>Link or token</span>
-        <input name="token" placeholder="https://…/my/verify/… or 64-char token" required />
-      </label>
-      <label style="margin-top:10px">
-        <span><input type="checkbox" name="remember" /> Remember this device</span>
-      </label>
-      <div class="actions">
-        <button class="btn primary" type="submit">View My Signups</button>
-      </div>
-    </form>
-  </div>
-
-  {% if not viewerEmail %}
-    <div class="panel" style="margin-top:12px">
-      <p class="muted">After you sign up for a shift, this page can also show your upcoming signups on this device.</p>
-      <p><a href="/">Browse events</a></p>
-    </div>
-  {% else %}
-    <div class="panel">
+	  {% if not viewerEmail %}
+	    <div class="panel" style="margin-top:12px">
+	      <p class="muted">If you sign up for a shift on this device, this page can show your upcoming signups here.</p>
+	      <p><a href="/">Browse events</a></p>
+	    </div>
+	  {% else %}
+	    <div class="panel">
       <div class="row">
         <span class="label">Email</span>
         <span class="value">{{ viewerEmail }}</span>

@@ -27,7 +27,7 @@ import {
   verifyMySignupsToken
 } from './public.js';
 import { cancelEventAndNotify, requireAdminToken } from './ops.js';
-import { sendEmail } from './email.js';
+import { canSendEmail, sendEmail } from './email.js';
 import {
   authenticateUser,
   createSession,
@@ -619,25 +619,27 @@ export async function buildApp(params: {
     try {
       const { token, expiresAt } = await requestMySignupsToken(params.db, email);
 
-      const verifyUrlRemember = `${config.appUrl}/my/verify/${encodeURIComponent(token)}?remember=1`;
       const verifyUrlOneTime = `${config.appUrl}/my/verify/${encodeURIComponent(token)}?remember=0`;
 
       if (config.env === 'development' || config.env === 'test') {
-        app.log.info({ email, verifyUrlRemember, verifyUrlOneTime, expiresAt }, 'my-signups token created');
+        app.log.info({ email, verifyUrlOneTime, expiresAt }, 'my-signups token created');
       } else {
         app.log.info({ email, expiresAt }, 'my-signups token created');
       }
 
-      if (config.env === 'development' || config.env === 'test') {
+      const hasSmtp = Boolean(config.smtp.host && config.smtp.fromEmail);
+
+      // In test we never send real email.
+      // In development we show the shortcut only when SMTP isn't configured.
+      if (config.env === 'test' || (config.env === 'development' && !hasSmtp)) {
         return render(reply, 'my_email_sent.njk', {
           email,
-          verifyUrlRemember,
           verifyUrlOneTime,
           expiresAt: expiresAt.toISOString()
         });
       }
 
-      if (!config.smtp.host || !config.smtp.fromEmail) {
+      if (!canSendEmail()) {
         return reply.code(501).view('my_email_sent.njk', { email, error: 'Email sending is not configured yet.' });
       }
 
@@ -645,13 +647,15 @@ export async function buildApp(params: {
         to: email,
         subject: 'Your VolunteerFlow sign-in link',
         text: [
-          'Use one of these links to view your upcoming signups:',
+          'Click to view signups:',
           '',
-          `Remember this device (recommended for personal devices): ${verifyUrlRemember}`,
+          verifyUrlOneTime,
           '',
-          `One-time view (recommended on public/shared devices): ${verifyUrlOneTime}`,
-          '',
-          'This link expires in 30 minutes.'
+          'This link can be used once and expires in 30 minutes.'
+        ].join('\n'),
+        html: [
+          '<p><a href="' + verifyUrlOneTime + '">Click to view signups</a></p>',
+          '<p style="color:#666;font-size:14px;margin:0">This link can be used once and expires in 30 minutes.</p>'
         ].join('\n')
       });
 
