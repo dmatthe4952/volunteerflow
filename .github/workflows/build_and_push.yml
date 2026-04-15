@@ -37,7 +37,7 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}
           tags: |
             # Use the latest tag for the main branch
-            type=raw,value=latest,enable={{is_main}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             # Use version tags for releases
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
