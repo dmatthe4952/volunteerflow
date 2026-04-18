@@ -112,6 +112,30 @@ export async function createSession(db: Kysely<DB>, params: { userId: string; tt
   return { id: row.id, expiresAt: row.expires_at };
 }
 
+export async function recordLoginAudit(
+  db: Kysely<DB>,
+  params: {
+    email: string;
+    attemptedRole?: UserRole;
+    userId?: string | null;
+    success: boolean;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  }
+) {
+  await db
+    .insertInto('login_audit')
+    .values({
+      email: params.email.trim(),
+      attempted_role: params.attemptedRole ?? null,
+      user_id: params.userId ?? null,
+      success: params.success,
+      ip_address: params.ipAddress ?? null,
+      user_agent: params.userAgent ?? null
+    })
+    .execute();
+}
+
 export async function loadCurrentUserFromSession(db: Kysely<DB>, sessionId: string): Promise<CurrentUser | null> {
   const row = await db
     .selectFrom('sessions')

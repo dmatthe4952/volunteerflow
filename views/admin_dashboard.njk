@@ -25,6 +25,7 @@
   <div class="panel" style="margin-top:16px">
     <div class="actions">
       <a class="btn primary" href="/admin/users">Manage Users</a>
+      <a class="btn" href="/admin/manager-orgs">Manager Org Assignments</a>
       <a class="btn" href="/admin/organizations">Organizations</a>
       <a class="btn" href="/admin/events">Events</a>
     </div>
@@ -41,5 +42,72 @@
         <button class="btn primary" type="submit">Go to Manager Dashboard</button>
       </div>
     </form>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <div class="title">Recent login audit</div>
+    {% if recentLoginAudit.length == 0 %}
+      <p class="muted" style="margin-top:10px">No login attempts recorded yet.</p>
+    {% else %}
+      <div class="table" style="margin-top:12px">
+        <div class="trow thead" style="grid-template-columns:1.2fr 0.8fr 0.7fr 1fr 1fr">
+          <div>When</div>
+          <div>Role</div>
+          <div>Result</div>
+          <div>User</div>
+          <div>IP</div>
+        </div>
+        {% for row in recentLoginAudit %}
+          <div class="trow" style="grid-template-columns:1.2fr 0.8fr 0.7fr 1fr 1fr">
+            <div>
+              <div>{{ row.createdAt }}</div>
+              {% if row.userAgent %}<div class="muted">{{ row.userAgent }}</div>{% endif %}
+            </div>
+            <div>{{ row.role or 'unknown' }}</div>
+            <div>{% if row.success %}Success{% else %}Failed{% endif %}</div>
+            <div>
+              <div>{% if row.userDisplayName %}{{ row.userDisplayName }}{% else %}Unknown user{% endif %}</div>
+              <div class="muted">{{ row.email }}</div>
+            </div>
+            <div>{{ row.ipAddress or 'n/a' }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <div class="title">Recent impersonation audit</div>
+    {% if recentImpersonationAudit.length == 0 %}
+      <p class="muted" style="margin-top:10px">No impersonation sessions recorded yet.</p>
+    {% else %}
+      <div class="table" style="margin-top:12px">
+        <div class="trow thead" style="grid-template-columns:1.1fr 1fr 1fr 0.8fr 0.8fr">
+          <div>Started</div>
+          <div>Admin</div>
+          <div>Manager</div>
+          <div>Ended</div>
+          <div>IP</div>
+        </div>
+        {% for row in recentImpersonationAudit %}
+          <div class="trow" style="grid-template-columns:1.1fr 1fr 1fr 0.8fr 0.8fr">
+            <div>
+              <div>{{ row.startedAt }}</div>
+              {% if row.userAgent %}<div class="muted">{{ row.userAgent }}</div>{% endif %}
+            </div>
+            <div>
+              <div>{{ row.adminDisplayName }}</div>
+              <div class="muted">{{ row.adminEmail }}</div>
+            </div>
+            <div>
+              <div>{{ row.managerDisplayName }}</div>
+              <div class="muted">{{ row.managerEmail }}</div>
+            </div>
+            <div>{{ row.endedAt or 'Active' }}</div>
+            <div>{{ row.ipAddress or 'n/a' }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
   </div>
 {% endblock %}

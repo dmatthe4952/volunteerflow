@@ -150,11 +150,16 @@ create index if not exists idx_sessions_expires_at on sessions(expires_at);
 create table if not exists login_audit (
   id bigserial primary key,
   email varchar(255) not null,
+  attempted_role user_role null,
+  user_id uuid null references users(id) on delete set null,
   success boolean not null,
   ip_address inet null,
   user_agent text null,
   created_at timestamptz not null default now()
 );
+
+create index if not exists idx_login_audit_created_at on login_audit(created_at desc);
+create index if not exists idx_login_audit_user_id on login_audit(user_id);
 
 create table if not exists system_settings (
   key text primary key,

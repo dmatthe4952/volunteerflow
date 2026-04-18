@@ -68,6 +68,45 @@ describe.skipIf(!DATABASE_URL)('admin auth', () => {
     });
     expect(dashRes.statusCode).toBe(200);
     expect(dashRes.body).toContain('Admin Dashboard');
+    expect(dashRes.body).toContain('Recent login audit');
+
+    const loginAuditRows = await db
+      .selectFrom('login_audit')
+      .select(['email', 'attempted_role', 'user_id', 'success'])
+      .orderBy('created_at', 'desc')
+      .execute();
+    expect(loginAuditRows).toHaveLength(1);
+    expect(loginAuditRows[0]?.email).toBe('admin@example.com');
+    expect(loginAuditRows[0]?.attempted_role).toBe('super_admin');
+    expect(loginAuditRows[0]?.success).toBe(true);
+  });
+
+  test('failed login attempts are audited', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/admin/setup',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({ email: 'admin@example.com', displayName: 'Admin', password: 'correct-horse-battery-staple' })
+    });
+
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/manager/login',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({ email: 'admin@example.com', password: 'wrong-password' })
+    });
+    expect(loginRes.statusCode).toBe(200);
+    expect(loginRes.body).toContain('Invalid email or password.');
+
+    const loginAuditRows = await db
+      .selectFrom('login_audit')
+      .select(['email', 'attempted_role', 'user_id', 'success'])
+      .orderBy('created_at', 'desc')
+      .execute();
+    expect(loginAuditRows).toHaveLength(1);
+    expect(loginAuditRows[0]?.email).toBe('admin@example.com');
+    expect(loginAuditRows[0]?.attempted_role).toBe('event_manager');
+    expect(loginAuditRows[0]?.user_id).toBeNull();
+    expect(loginAuditRows[0]?.success).toBe(false);
   });
 });
-
