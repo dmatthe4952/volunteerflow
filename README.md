@@ -1,12 +1,12 @@
-# VolunteerFlow
+# LocalShifts
 
-Node + Fastify + Nunjucks + Postgres implementation per `VolunteerFlow_PRD_v1.0.md`.
+Node + Fastify + Nunjucks + Postgres implementation for LocalShifts.
 
 Operator runbook: `OPERATORS_MANUAL.md`
 
 ## Staging / production
 
-VolunteerFlow is intended to be run via Docker Compose on a server (staging and above). The app runs DB migrations automatically on startup.
+LocalShifts is intended to be run via Docker Compose on a server (staging and above). The app runs DB migrations automatically on startup.
 
 1) Create `.env.staging` on the server (start from `.env.staging.example`) and set at least:
 - `APP_URL`
@@ -74,5 +74,5 @@ Testing:
 Postgres is not exposed on a host port by default; to connect from your machine, use:
 
 ```bash
-docker compose exec db psql -U volunteerflow volunteerflow
+docker compose exec db psql -U localshifts localshifts
 ```

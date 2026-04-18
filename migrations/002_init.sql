@@ -1,4 +1,4 @@
--- VolunteerFlow core schema (PRD v1.0)
+-- LocalShifts core schema (PRD v1.0)
 
 create extension if not exists pgcrypto;
 

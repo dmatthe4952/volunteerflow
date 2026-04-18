@@ -28,7 +28,7 @@ function fromHeader(): string {
   const fromName = config.smtp.fromName;
   if (fromEmail) return fromName ? `"${fromName}" <${fromEmail}>` : fromEmail;
   // Dev fallback so local sendmail has something sane.
-  if (config.env === 'development') return `"${fromName || 'VolunteerFlow'}" <no-reply@localhost>`;
+  if (config.env === 'development') return `"${fromName || 'LocalShifts'}" <no-reply@localhost>`;
   return '';
 }
 
@@ -71,7 +71,7 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
       } as any);
 
       await transporter.sendMail({
-        from: from || `"VolunteerFlow" <no-reply@localhost>`,
+        from: from || `"LocalShifts" <no-reply@localhost>`,
         to: msg.to,
         subject: msg.subject,
         text: msg.text,

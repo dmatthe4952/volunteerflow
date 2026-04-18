@@ -174,7 +174,7 @@ export async function sendUpcomingShiftReminders(params: {
       cancelUrl ? '' : '',
       cancelUrl ? `Need to cancel? ${cancelUrl}` : '',
       '',
-      `— VolunteerFlow`
+      `— LocalShifts`
     ]
       .filter(Boolean)
       .join('\n');
@@ -190,7 +190,7 @@ export async function sendUpcomingShiftReminders(params: {
         `<a href="${escapeAttr(eventUrl)}">View event details</a><br/>` +
         `</p>`,
       cancelUrl ? `<p><a href="${escapeAttr(cancelUrl)}">Need to cancel? Click here.</a></p>` : '',
-      `<p>— VolunteerFlow</p>`
+      `<p>— LocalShifts</p>`
     ]
       .filter(Boolean)
       .join('\n');
@@ -266,7 +266,7 @@ export async function sendSignupConfirmationWithKind(db: Kysely<DB>, signupId: s
     '',
     `Need to Cancel? Click here: ${cancelUrl}`,
     '',
-    `— VolunteerFlow`
+    `— LocalShifts`
   ]
     .filter(Boolean)
     .join('\n');
@@ -283,7 +283,7 @@ export async function sendSignupConfirmationWithKind(db: Kysely<DB>, signupId: s
       `</p>`,
     note ? `<p><strong>Message from the organizer</strong><br/>${plainTextToHtml(note)}</p>` : '',
     `<p><a href="${escapeAttr(cancelUrl)}">Need to Cancel? Click here.</a></p>`,
-    `<p>— VolunteerFlow</p>`
+    `<p>— LocalShifts</p>`
   ]
     .filter(Boolean)
     .join('\n');
@@ -352,7 +352,7 @@ export async function sendCancellationEmails(db: Kysely<DB>, signupId: string, c
       '',
       `Cancelled at: ${canceledLocal}`,
       '',
-      `— VolunteerFlow`
+      `— LocalShifts`
     ].join('\n')
   });
 
@@ -376,7 +376,7 @@ export async function sendCancellationEmails(db: Kysely<DB>, signupId: string, c
       '',
       note,
       '',
-      `— VolunteerFlow`
+      `— LocalShifts`
     ]
       .filter(Boolean)
       .join('\n')
@@ -423,7 +423,7 @@ export async function sendManagerRemovalNotice(db: Kysely<DB>, signupId: string)
       '',
       `If you think this is a mistake, reply to the organizer.`,
       '',
-      `— VolunteerFlow`
+      `— LocalShifts`
     ].join('\n')
   });
 }
