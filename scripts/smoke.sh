@@ -125,7 +125,7 @@ check_email_test() {
     return 0
   fi
 
-  payload="$(printf '{"to":"%s","subject":"VolunteerFlow staging smoke test","text":"Smoke test at %s"}' \
+  payload="$(printf '{"to":"%s","subject":"LocalShifts staging smoke test","text":"Smoke test at %s"}' \
     "$EMAIL_TO" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")"
 
   body="$(curl -fsS --max-time 15 -H "x-admin-token: $ADMIN_TOKEN" -H 'content-type: application/json' -d "$payload" "$BASE_URL/ops/email/test" || true)"

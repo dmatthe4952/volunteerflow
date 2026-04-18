@@ -1,6 +1,6 @@
-# VolunteerFlow Operators Manual (v1)
+# LocalShifts Operators Manual (v1)
 
-This manual describes how to operate the current VolunteerFlow build, by role, and the exact steps for each activity.
+This manual describes how to operate the current LocalShifts build, by role, and the exact steps for each activity.
 
 ## Common URLs
 
@@ -210,7 +210,7 @@ Recommended approach:
    - `cp deploy/shell/codeSnippetForbashrc.example ./codeSnippetForbashrc`
    - `chmod 600 ./codeSnippetForbashrc`
 2. Source it from `~/.bashrc`:
-   - `echo 'test -f ~/projects/volunteerflow/codeSnippetForbashrc && . ~/projects/volunteerflow/codeSnippetForbashrc' >> ~/.bashrc`
+   - `echo 'test -f ~/projects/localshifts/codeSnippetForbashrc && . ~/projects/localshifts/codeSnippetForbashrc' >> ~/.bashrc`
 
 Notes:
 - `codeSnippetForbashrc` is ignored by git to avoid committing secrets.
@@ -248,7 +248,7 @@ Optional (staging): use the helper script to split “build” from “up” (an
 - `sh scripts/deploy-staging.sh`
 
 Optional (staging): one-command update from git + deploy + smoke test:
-- `GIT_REMOTE_URL=https://github.com/dmatthe4952/volunteerflow.git sh scripts/deploy-staging-from-git.sh`
+- `GIT_REMOTE_URL=https://github.com/dmatthe4952/localshifts.git sh scripts/deploy-staging-from-git.sh`
 
 Note: you do not need a modern Node.js installed on the host to deploy. The TypeScript build and template checks run inside the Docker image build (Node 20).
 
@@ -314,8 +314,8 @@ When to switch to an SMTP relay (smarthost):
 - If you see repeated provider errors like `Service unavailable`, connection throttling, or long-lived deferrals in `mailq`, your droplet IP reputation is likely the issue.
 - If outbound port `25` is blocked by your provider/network, direct delivery will fail.
 - In those cases, configure a relay provider (SES/SendGrid/Mailgun/etc.) and either:
-  - point VolunteerFlow directly at the provider via `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS`, or
-  - configure sendmail to use a `SMART_HOST` and keep VolunteerFlow relaying to localhost.
+  - point LocalShifts directly at the provider via `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS`, or
+  - configure sendmail to use a `SMART_HOST` and keep LocalShifts relaying to localhost.
 
 ### Managed Postgres + SSL (DigitalOcean, etc.)
 If you use a managed database and see TLS errors like `SELF_SIGNED_CERT_IN_CHAIN`, use one of these approaches:
@@ -324,13 +324,13 @@ If you use a managed database and see TLS errors like `SELF_SIGNED_CERT_IN_CHAIN
 - Strict (verify server cert/hostname): set `sslmode=verify-full` and provide the CA via `DATABASE_SSL_CA_PEM` or `DATABASE_SSL_CA_FILE`.
 
 ### Staging: start on boot (systemd)
-Optional helper unit lives in `deploy/systemd/volunteerflow.service`.
+Optional helper unit lives in `deploy/systemd/localshifts.service`.
 
-1. Copy it to `/etc/systemd/system/volunteerflow.service`.
+1. Copy it to `/etc/systemd/system/localshifts.service`.
 2. Update `WorkingDirectory=` to your repo path.
 3. Enable + start:
    - `sudo systemctl daemon-reload`
-   - `sudo systemctl enable --now volunteerflow`
+   - `sudo systemctl enable --now localshifts`
 
 Email types currently sent:
 - Signup confirmation (includes cancel link)

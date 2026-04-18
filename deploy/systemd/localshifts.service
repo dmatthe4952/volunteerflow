@@ -1,12 +1,12 @@
 [Unit]
-Description=VolunteerFlow (Docker Compose)
+Description=LocalShifts (Docker Compose)
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/root/projects/volunteerflow
+WorkingDirectory=/root/projects/localshifts
 ExecStartPre=/bin/sh -lc 'for i in $(seq 1 30); do docker info >/dev/null 2>&1 && exit 0; sleep 2; done; echo "docker daemon not ready" >&2; exit 1'
 ExecStart=/usr/bin/docker compose --env-file .env.staging -f docker-compose.staging.yml up -d --build
 ExecStop=/usr/bin/docker compose --env-file .env.staging -f docker-compose.staging.yml down

@@ -80,7 +80,7 @@ export async function cancelEventAndNotify(params: { db: Kysely<DB>; slugOrId: s
       '',
       cancelUrl ? `If you still need to cancel your signup record: ${cancelUrl}` : '',
       '',
-      `— VolunteerFlow`
+      `— LocalShifts`
     ]
       .filter((line) => line !== '')
       .join('\n');

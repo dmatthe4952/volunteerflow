@@ -1,6 +1,6 @@
 # Systemd (staging)
 
-This is an optional way to ensure the VolunteerFlow Docker Compose stack starts on boot.
+This is an optional way to ensure the LocalShifts Docker Compose stack starts on boot.
 
 ## Prerequisites
 
@@ -13,12 +13,12 @@ This is an optional way to ensure the VolunteerFlow Docker Compose stack starts 
 ## Install
 
 1. Copy the unit file:
-   - `sudo cp deploy/systemd/volunteerflow.service /etc/systemd/system/volunteerflow.service`
-2. Edit `/etc/systemd/system/volunteerflow.service` and set:
+   - `sudo cp deploy/systemd/localshifts.service /etc/systemd/system/localshifts.service`
+2. Edit `/etc/systemd/system/localshifts.service` and set:
    - `WorkingDirectory=` to the folder containing `docker-compose.staging.yml` and `.env.staging`
 3. Enable + start:
    - `sudo systemctl daemon-reload`
-   - `sudo systemctl enable --now volunteerflow`
+   - `sudo systemctl enable --now localshifts`
 
 Notes:
 - Some servers won’t have a `docker.service` unit name (snap installs, custom setups). The unit waits for `docker info` to succeed instead of depending on a specific service name.
@@ -35,9 +35,9 @@ From the repo root on the server:
 
 ## Operate
 
-- Status: `sudo systemctl status volunteerflow`
-- Logs: `sudo journalctl -u volunteerflow -f`
-- Restart: `sudo systemctl restart volunteerflow`
+- Status: `sudo systemctl status localshifts`
+- Logs: `sudo journalctl -u localshifts -f`
+- Restart: `sudo systemctl restart localshifts`
 
 ## Troubleshooting
 

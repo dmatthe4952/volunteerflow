@@ -1,4 +1,4 @@
-# VolunteerFlow admin convenience snippet (bash)
+# LocalShifts admin convenience snippet (bash)
 #
 # Purpose: make $ADMIN_TOKEN available in your shell for ops endpoints like:
 #   curl -H "x-admin-token: $ADMIN_TOKEN" ...
@@ -9,7 +9,7 @@
 # 2) Lock it down:
 #      chmod 600 ./codeSnippetForbashrc
 # 3) Source it from your ~/.bashrc:
-#      echo 'test -f ~/projects/volunteerflow/codeSnippetForbashrc && . ~/projects/volunteerflow/codeSnippetForbashrc' >> ~/.bashrc
+#      echo 'test -f ~/projects/localshifts/codeSnippetForbashrc && . ~/projects/localshifts/codeSnippetForbashrc' >> ~/.bashrc
 #
 # Notes:
 # - Keep this file OUT of git (repo .gitignore ignores `codeSnippetForbashrc`).
@@ -17,14 +17,13 @@
 
 set -o allexport 2>/dev/null || true
 
-VF_REPO_DIR="${VF_REPO_DIR:-$HOME/projects/volunteerflow}"
-VF_ENV_FILE="${VF_ENV_FILE:-$VF_REPO_DIR/.env.staging}"
+LS_REPO_DIR="${LS_REPO_DIR:-$HOME/projects/localshifts}"
+LS_ENV_FILE="${LS_ENV_FILE:-$LS_REPO_DIR/.env.staging}"
 
-if [ -f "$VF_ENV_FILE" ]; then
-  ADMIN_TOKEN="$(grep -E '^ADMIN_TOKEN=' "$VF_ENV_FILE" | head -n 1 | cut -d= -f2-)"
+if [ -f "$LS_ENV_FILE" ]; then
+  ADMIN_TOKEN="$(grep -E '^ADMIN_TOKEN=' "$LS_ENV_FILE" | head -n 1 | cut -d= -f2-)"
   export ADMIN_TOKEN
 fi
 
-unset VF_REPO_DIR VF_ENV_FILE
+unset LS_REPO_DIR LS_ENV_FILE
 set +o allexport 2>/dev/null || true
-

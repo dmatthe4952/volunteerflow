@@ -56,7 +56,7 @@ async function main() {
       .returning(['id'])
       .executeTakeFirstOrThrow();
 
-    const orgName = 'VolunteerFlow Demo';
+    const orgName = 'LocalShifts Demo';
     const orgSlug = slugify(orgName);
     const org = await db
       .insertInto('organizations')

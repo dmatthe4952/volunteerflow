@@ -651,7 +651,7 @@ export async function buildApp(params: {
 
       await sendEmail({
         to: email,
-        subject: 'Your VolunteerFlow sign-in link',
+        subject: 'Your LocalShifts sign-in link',
         text: [
           'Click to view signups:',
           '',
@@ -2727,8 +2727,8 @@ export async function buildApp(params: {
       }
 
       const to = String(body.to ?? '').trim();
-      const subject = String(body.subject ?? 'VolunteerFlow test email').trim();
-      const text = String(body.text ?? 'This is a test email from VolunteerFlow.').trim();
+      const subject = String(body.subject ?? 'LocalShifts test email').trim();
+      const text = String(body.text ?? 'This is a test email from LocalShifts.').trim();
 
       if (!to || !to.includes('@') || /\s/.test(to) || to.includes('\n') || to.includes('\r')) throw new Error('Valid `to` email is required.');
       if (!subject || subject.length > 200 || subject.includes('\n') || subject.includes('\r')) throw new Error('Valid `subject` is required.');

@@ -6,7 +6,7 @@ COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.staging.yml}"
 SERVICE="${SERVICE:-app}"
 
 GIT_REMOTE_NAME="${GIT_REMOTE_NAME:-origin}"
-GIT_REMOTE_URL="${GIT_REMOTE_URL:-}" # e.g. https://github.com/dmatthe4952/volunteerflow.git
+GIT_REMOTE_URL="${GIT_REMOTE_URL:-}" # e.g. https://github.com/dmatthe4952/localshifts.git
 GIT_BRANCH="${GIT_BRANCH:-}"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -52,4 +52,3 @@ echo "[3/4] Smoke test"
 BASE_URL="$BASE_URL" ADMIN_TOKEN="$ADMIN_TOKEN" sh scripts/smoke.sh
 
 echo "[4/4] Done ($after_sha)"
-

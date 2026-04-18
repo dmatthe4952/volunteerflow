@@ -40,7 +40,7 @@ export const config = {
     secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER ?? '',
     pass: process.env.SMTP_PASS ?? '',
-    fromName: process.env.SMTP_FROM_NAME ?? 'VolunteerFlow',
+    fromName: process.env.SMTP_FROM_NAME ?? 'LocalShifts',
     fromEmail: process.env.SMTP_FROM_EMAIL ?? ''
   }
 } as const;
