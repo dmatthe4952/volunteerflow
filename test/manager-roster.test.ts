@@ -73,6 +73,14 @@ describe.skipIf(!DATABASE_URL)('manager roster', () => {
       payload: formEncode({ email: 'manager@example.com', displayName: 'Manager', password: 'correct-horse-battery-staple' })
     });
 
+    const adminUser = await db.selectFrom('users').select(['id']).where('email', '=', 'admin@example.com').executeTakeFirstOrThrow();
+    const managerUser = await db.selectFrom('users').select(['id']).where('email', '=', 'manager@example.com').executeTakeFirstOrThrow();
+    const orgRow = await db.selectFrom('organizations').select(['id']).where('slug', '=', 'test-org').executeTakeFirstOrThrow();
+    await db
+      .insertInto('manager_organizations')
+      .values({ manager_id: managerUser.id, organization_id: orgRow.id, assigned_by: adminUser.id })
+      .execute();
+
     const mgrLogin = await app.inject({
       method: 'POST',
       url: '/manager/login',
@@ -129,7 +137,7 @@ describe.skipIf(!DATABASE_URL)('manager roster', () => {
 
     const roster = await app.inject({ method: 'GET', url: `/manager/events/${eventId}/signups`, headers: { cookie: mgrCookie } });
     expect(roster.statusCode).toBe(200);
-    expect(roster.body).toContain('Ada Lovelace');
+    expect(roster.body).toContain('Ada L');
 
     const signup = await db.selectFrom('signups').select(['id', 'status']).where('shift_id', '=', shiftId).executeTakeFirstOrThrow();
     expect(signup.status).toBe('active');

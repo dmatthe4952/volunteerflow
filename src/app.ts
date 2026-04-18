@@ -34,7 +34,8 @@ import {
   createUser,
   deleteSession,
   hasAnySuperAdmin,
-  loadCurrentUserFromSession
+  loadCurrentUserFromSession,
+  recordLoginAudit
 } from './auth.js';
 import {
   sendCancellationEmails,
@@ -43,6 +44,7 @@ import {
   sendSignupConfirmationWithKind
 } from './notifications.js';
 import { compileNunjucksTemplates } from './templates.js';
+import { setEventTags } from './tags.js';
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -758,8 +760,25 @@ export async function buildApp(params: {
     const email = String(body.email ?? '');
     const password = String(body.password ?? '');
     const user = await authenticateUser(params.db, { email, password, role: 'super_admin' });
-    if (!user) return render(reply, 'admin_login.njk', { error: 'Invalid email or password.' });
+    if (!user) {
+      await recordLoginAudit(params.db, {
+        email,
+        attemptedRole: 'super_admin',
+        success: false,
+        ipAddress: (req as any).ip ?? null,
+        userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null
+      });
+      return render(reply, 'admin_login.njk', { error: 'Invalid email or password.' });
+    }
     const sess = await createSession(params.db, { userId: user.id, ttlDays: 30 });
+    await recordLoginAudit(params.db, {
+      email: user.email,
+      attemptedRole: 'super_admin',
+      userId: user.id,
+      success: true,
+      ipAddress: (req as any).ip ?? null,
+      userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null
+    });
     reply.setCookie('vf_sess', sess.id, {
       path: '/',
       httpOnly: true,
@@ -782,8 +801,25 @@ export async function buildApp(params: {
     const email = String(body.email ?? '');
     const password = String(body.password ?? '');
     const user = await authenticateUser(params.db, { email, password, role: 'event_manager' });
-    if (!user) return render(reply, 'manager_login.njk', { error: 'Invalid email or password.' });
+    if (!user) {
+      await recordLoginAudit(params.db, {
+        email,
+        attemptedRole: 'event_manager',
+        success: false,
+        ipAddress: (req as any).ip ?? null,
+        userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null
+      });
+      return render(reply, 'manager_login.njk', { error: 'Invalid email or password.' });
+    }
     const sess = await createSession(params.db, { userId: user.id, ttlDays: 30 });
+    await recordLoginAudit(params.db, {
+      email: user.email,
+      attemptedRole: 'event_manager',
+      userId: user.id,
+      success: true,
+      ipAddress: (req as any).ip ?? null,
+      userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null
+    });
     reply.setCookie('vf_sess', sess.id, {
       path: '/',
       httpOnly: true,
@@ -825,6 +861,40 @@ export async function buildApp(params: {
       .select((eb) => eb.fn.countAll<number>().as('c'))
       .where(sql<boolean>`created_at >= now() - interval '30 days'`)
       .executeTakeFirst();
+    const recentLoginAudit = await params.db
+      .selectFrom('login_audit as la')
+      .leftJoin('users as u', 'u.id', 'la.user_id')
+      .select([
+        'la.id',
+        'la.email',
+        'la.attempted_role',
+        'la.success',
+        'la.ip_address',
+        'la.user_agent',
+        'la.created_at',
+        'u.display_name as user_display_name'
+      ])
+      .orderBy('la.created_at', 'desc')
+      .limit(10)
+      .execute();
+    const recentImpersonationAudit = await params.db
+      .selectFrom('impersonation_log as il')
+      .innerJoin('users as admin_user', 'admin_user.id', 'il.admin_user_id')
+      .innerJoin('users as manager_user', 'manager_user.id', 'il.manager_user_id')
+      .select([
+        'il.id',
+        'il.started_at',
+        'il.ended_at',
+        'il.ip_address',
+        'il.user_agent',
+        'admin_user.display_name as admin_display_name',
+        'admin_user.email as admin_email',
+        'manager_user.display_name as manager_display_name',
+        'manager_user.email as manager_email'
+      ])
+      .orderBy('il.started_at', 'desc')
+      .limit(10)
+      .execute();
     return render(reply, 'admin_dashboard.njk', {
       ok,
       error,
@@ -832,7 +902,28 @@ export async function buildApp(params: {
         events: Number(events?.c ?? 0),
         upcomingShifts: Number(upcomingShifts?.c ?? 0),
         signups30d: Number(signups30d?.c ?? 0)
-      }
+      },
+      recentLoginAudit: recentLoginAudit.map((row: any) => ({
+        id: row.id,
+        email: row.email,
+        role: row.attempted_role,
+        success: Boolean(row.success),
+        ipAddress: row.ip_address,
+        userAgent: row.user_agent,
+        createdAt: row.created_at,
+        userDisplayName: row.user_display_name
+      })),
+      recentImpersonationAudit: recentImpersonationAudit.map((row: any) => ({
+        id: row.id,
+        startedAt: row.started_at,
+        endedAt: row.ended_at,
+        ipAddress: row.ip_address,
+        userAgent: row.user_agent,
+        adminDisplayName: row.admin_display_name,
+        adminEmail: row.admin_email,
+        managerDisplayName: row.manager_display_name,
+        managerEmail: row.manager_email
+      }))
     });
   });
 
@@ -879,6 +970,16 @@ export async function buildApp(params: {
     if (!manager?.id) return reply.code(303).redirect(`/admin/dashboard?err=${encodeURIComponent('No matching manager found.')}`);
 
     await params.db
+      .insertInto('impersonation_log')
+      .values({
+        admin_user_id: currentUser.id,
+        manager_user_id: manager.id,
+        ip_address: (req as any).ip ?? null,
+        user_agent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null
+      })
+      .execute();
+
+    await params.db
       .updateTable('sessions')
       .set({
         data: sql`coalesce(data, '{}'::jsonb) || ${JSON.stringify({ impersonate_user_id: manager.id })}::jsonb`
@@ -900,10 +1001,28 @@ export async function buildApp(params: {
     const sess = await params.db
       .selectFrom('sessions')
       .innerJoin('users', 'users.id', 'sessions.user_id')
-      .select(['sessions.id', 'users.role'])
+      .select(['sessions.id', 'sessions.user_id', 'sessions.data', 'users.role'])
       .where('sessions.id', '=', sessionId)
       .executeTakeFirst();
     if (!sess || sess.role !== 'super_admin') return reply.code(303).redirect('/');
+
+    const data = (sess as any).data as any;
+    const impersonatedId = typeof data?.impersonate_user_id === 'string' ? data.impersonate_user_id : null;
+    if (impersonatedId) {
+      await sql`
+        update impersonation_log
+        set ended_at = now()
+        where id = (
+          select id
+          from impersonation_log
+          where admin_user_id = ${sess.user_id}
+            and manager_user_id = ${impersonatedId}
+            and ended_at is null
+          order by started_at desc
+          limit 1
+        )
+      `.execute(params.db);
+    }
 
     await params.db
       .updateTable('sessions')
@@ -1133,6 +1252,106 @@ export async function buildApp(params: {
     if (!user) return reply.code(404).view('not_found.njk', { message: 'User not found.' });
     await params.db.updateTable('users').set({ is_active: !user.is_active }).where('id', '=', id).execute();
     return reply.code(303).redirect('/admin/users');
+  });
+
+  app.get('/admin/manager-orgs', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const qs = req.query as Record<string, string | undefined>;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+
+    const managers = await params.db
+      .selectFrom('users')
+      .select(['id', 'email', 'display_name'])
+      .where('role', '=', 'event_manager')
+      .orderBy('display_name', 'asc')
+      .execute();
+
+    const assignmentRows = await params.db
+      .selectFrom('manager_organizations')
+      .innerJoin('organizations', 'organizations.id', 'manager_organizations.organization_id')
+      .select(['manager_organizations.manager_id as manager_id', 'organizations.name as org_name'])
+      .orderBy('organizations.name', 'asc')
+      .execute();
+
+    const orgsByManagerId = new Map<string, string[]>();
+    for (const r of assignmentRows as any[]) {
+      const mid = String(r.manager_id);
+      const arr = orgsByManagerId.get(mid) ?? [];
+      arr.push(String(r.org_name));
+      orgsByManagerId.set(mid, arr);
+    }
+
+    return render(reply, 'admin_manager_orgs.njk', {
+      ok,
+      error,
+      managers: (managers as any[]).map((m) => ({
+        id: m.id,
+        email: m.email,
+        displayName: m.display_name,
+        orgNames: orgsByManagerId.get(m.id) ?? []
+      }))
+    });
+  });
+
+  app.get('/admin/manager-orgs/:id', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const { id } = req.params as { id: string };
+    const qs = req.query as Record<string, string | undefined>;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+
+    const manager = await params.db
+      .selectFrom('users')
+      .select(['id', 'email', 'display_name'])
+      .where('id', '=', id)
+      .where('role', '=', 'event_manager')
+      .executeTakeFirst();
+    if (!manager) return reply.code(404).view('not_found.njk', { message: 'Manager not found.' });
+
+    const orgs = await params.db.selectFrom('organizations').select(['id', 'name']).orderBy('name', 'asc').execute();
+    const assigned = await params.db
+      .selectFrom('manager_organizations')
+      .select(['organization_id'])
+      .where('manager_id', '=', id)
+      .execute();
+    const assignedSet = new Set(assigned.map((a) => a.organization_id));
+
+    return render(reply, 'admin_manager_orgs_edit.njk', {
+      ok,
+      error,
+      manager: { id: manager.id, email: manager.email, displayName: manager.display_name },
+      orgs: orgs.map((o) => ({ id: o.id, name: o.name, isAssigned: assignedSet.has(o.id) }))
+    });
+  });
+
+  app.post('/admin/manager-orgs/:id', async (req, reply) => {
+    const currentUser = requireRole(req, 'super_admin');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const raw = (body.orgIds ?? []) as unknown;
+    const orgIds = Array.isArray(raw) ? raw.map((v) => String(v)) : typeof raw === 'string' ? [raw] : [];
+
+    const manager = await params.db
+      .selectFrom('users')
+      .select(['id'])
+      .where('id', '=', id)
+      .where('role', '=', 'event_manager')
+      .executeTakeFirst();
+    if (!manager) return reply.code(404).view('not_found.njk', { message: 'Manager not found.' });
+
+    await params.db.transaction().execute(async (trx) => {
+      await trx.deleteFrom('manager_organizations').where('manager_id', '=', id).execute();
+      if (!orgIds.length) return;
+      const rows = orgIds.map((orgId) => ({
+        manager_id: id,
+        organization_id: orgId,
+        assigned_by: currentUser.id
+      }));
+      await trx.insertInto('manager_organizations').values(rows).onConflict((oc) => oc.columns(['manager_id', 'organization_id']).doNothing()).execute();
+    });
+
+    return reply.code(303).redirect(`/admin/manager-orgs/${encodeURIComponent(id)}?ok=${encodeURIComponent('Assignments saved.')}`);
   });
 
   app.get('/manager/dashboard', async (req, reply) => {
@@ -1520,9 +1739,16 @@ export async function buildApp(params: {
   });
 
   app.get('/manager/events/new', async (req, reply) => {
-    requireRole(req, 'event_manager');
-    const orgs = await params.db.selectFrom('organizations').select(['id', 'name']).orderBy('name', 'asc').execute();
-    return render(reply, 'manager_event_new.njk', { orgs });
+    const currentUser = requireRole(req, 'event_manager');
+    const orgs = await params.db
+      .selectFrom('organizations')
+      .innerJoin('manager_organizations', 'manager_organizations.organization_id', 'organizations.id')
+      .select(['organizations.id', 'organizations.name'])
+      .where('manager_organizations.manager_id', '=', currentUser.id)
+      .orderBy('organizations.name', 'asc')
+      .execute();
+    const error = orgs.length === 0 ? 'No organizations are assigned to your account yet. Ask an admin to assign one.' : null;
+    return render(reply, 'manager_event_new.njk', { orgs, error });
   });
 
   app.post('/manager/events/new', async (req, reply) => {
@@ -1542,6 +1768,13 @@ export async function buildApp(params: {
       if (!title || title.length > 200) throw new Error('Invalid title.');
       if (!organizationId) throw new Error('Organization is required.');
       if (confirmationEmailNote.length > 2000) throw new Error('Confirmation note is too long (max 2000 characters).');
+      const allowedOrg = await params.db
+        .selectFrom('manager_organizations')
+        .select(['organization_id'])
+        .where('manager_id', '=', currentUser.id)
+        .where('organization_id', '=', organizationId)
+        .executeTakeFirst();
+      if (!allowedOrg) throw new Error('You are not assigned to that organization.');
       const startDate = parseDateOnly(date);
       const slug = await uniqueEventSlug(title);
       const category = (isFeatured ? 'featured' : 'normal') as EventCategory;
@@ -1571,9 +1804,16 @@ export async function buildApp(params: {
         .returning(['id'])
         .executeTakeFirstOrThrow();
 
+      await setEventTags({ db: params.db, eventId: inserted.id, tagNames: tags, createdByUserId: currentUser.id });
       return reply.code(303).redirect(`/manager/events/${inserted.id}/edit`);
     } catch (err: any) {
-      const orgs = await params.db.selectFrom('organizations').select(['id', 'name']).orderBy('name', 'asc').execute();
+      const orgs = await params.db
+        .selectFrom('organizations')
+        .innerJoin('manager_organizations', 'manager_organizations.organization_id', 'organizations.id')
+        .select(['organizations.id', 'organizations.name'])
+        .where('manager_organizations.manager_id', '=', currentUser.id)
+        .orderBy('organizations.name', 'asc')
+        .execute();
       return render(reply, 'manager_event_new.njk', { orgs, error: String(err?.message ?? err) });
     }
   });
@@ -1610,7 +1850,23 @@ export async function buildApp(params: {
       .executeTakeFirst();
     if (!event) return reply.code(404).view('not_found.njk', { message: 'Event not found.' });
 
-    const orgs = await params.db.selectFrom('organizations').select(['id', 'name']).orderBy('name', 'asc').execute();
+    const orgsBase = await params.db
+      .selectFrom('organizations')
+      .innerJoin('manager_organizations', 'manager_organizations.organization_id', 'organizations.id')
+      .select(['organizations.id', 'organizations.name'])
+      .where('manager_organizations.manager_id', '=', currentUser.id)
+      .orderBy('organizations.name', 'asc')
+      .execute();
+    const orgs = orgsBase.some((o) => o.id === event.organization_id)
+      ? orgsBase
+      : [
+          ...(orgsBase as any[]),
+          ...(await params.db
+            .selectFrom('organizations')
+            .select(['id', 'name'])
+            .where('id', '=', event.organization_id)
+            .execute())
+        ];
     const shifts = await params.db
       .selectFrom('shifts')
       .select([
@@ -1708,6 +1964,24 @@ export async function buildApp(params: {
       const ed = parseDateOnly(endDate);
       const category = (isFeatured ? 'featured' : 'normal') as EventCategory;
 
+      const existing = await params.db
+        .selectFrom('events')
+        .select(['organization_id'])
+        .where('id', '=', id)
+        .where('manager_id', '=', currentUser.id)
+        .executeTakeFirst();
+      if (!existing) throw new Error('Event not found.');
+
+      if (existing.organization_id !== organizationId) {
+        const allowedOrg = await params.db
+          .selectFrom('manager_organizations')
+          .select(['organization_id'])
+          .where('manager_id', '=', currentUser.id)
+          .where('organization_id', '=', organizationId)
+          .executeTakeFirst();
+        if (!allowedOrg) throw new Error('You are not assigned to that organization.');
+      }
+
       await params.db
         .updateTable('events')
         .set({
@@ -1727,6 +2001,7 @@ export async function buildApp(params: {
         .where('manager_id', '=', currentUser.id)
         .execute();
 
+      await setEventTags({ db: params.db, eventId: id, tagNames: tags, createdByUserId: currentUser.id });
       return reply.code(303).redirect(`/manager/events/${id}/edit`);
     } catch (err: any) {
       return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);

@@ -1,0 +1,36 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>Manager Org Assignments</h1>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+  {% if ok %}
+    <div class="flash ok"><div>{{ ok }}</div></div>
+  {% endif %}
+
+  {% if managers.length == 0 %}
+    <div class="panel"><p class="muted">No event managers yet.</p></div>
+  {% else %}
+    <div class="stack">
+      {% for m in managers %}
+        <div class="panel">
+          <div class="title">{{ m.displayName }}</div>
+          <div class="meta">{{ m.email }}</div>
+          <div class="muted" style="margin-top:8px">
+            Orgs:
+            {% if m.orgNames.length == 0 %}
+              <span class="muted">None</span>
+            {% else %}
+              {{ m.orgNames | join(', ') }}
+            {% endif %}
+          </div>
+          <div class="actions" style="margin-top:12px">
+            <a class="btn" href="/admin/manager-orgs/{{ m.id }}">Edit assignments</a>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}
+

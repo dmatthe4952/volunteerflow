@@ -130,8 +130,10 @@ export async function listPublicEvents(db: Kysely<DB>) {
 
 export async function listPublicEventTags(db: Kysely<DB>) {
   const res = await sql<{ tag: string }>`
-    select distinct unnest(e.tags) as tag
-    from events e
+    select distinct t.name as tag
+    from tags t
+    join event_tags et on et.tag_id = t.id
+    join events e on e.id = et.event_id
     where e.is_published = true
       and e.is_archived = false
     order by tag asc
@@ -149,7 +151,15 @@ export async function listPublicEventsFiltered(db: Kysely<DB>, params: { tag: st
     .where('events.is_archived', '=', false);
 
   if (params.tag) {
-    q = q.where(sql<boolean>`events.tags @> ARRAY[${params.tag}]::text[]`);
+    q = q.where(
+      sql<boolean>`exists (
+        select 1
+        from event_tags et
+        join tags t on t.id = et.tag_id
+        where et.event_id = events.id
+          and t.name = ${params.tag}
+      )`
+    );
   }
 
   const rows = await q
@@ -158,7 +168,6 @@ export async function listPublicEventsFiltered(db: Kysely<DB>, params: { tag: st
       'events.slug',
       'events.title',
       'events.is_featured',
-      'events.tags',
       'events.start_date',
       'events.end_date',
       'events.location_name',
@@ -169,6 +178,16 @@ export async function listPublicEventsFiltered(db: Kysely<DB>, params: { tag: st
       'organizations.slug as organization_slug',
       'organizations.primary_color as organization_primary_color'
     ])
+    .select(
+      sql<string[]>`
+        (
+          select coalesce(array_agg(t.name order by t.name), '{}')
+          from event_tags et
+          join tags t on t.id = et.tag_id
+          where et.event_id = events.id
+        )
+      `.as('tags')
+    )
     .select(
       sql<string>`
         (

@@ -1,6 +1,7 @@
 import { createDb } from '../src/db.js';
 import { config } from '../src/config.js';
 import { hashPassword } from '../src/auth.js';
+import { setEventTags } from '../src/tags.js';
 
 function slugify(input: string): string {
   return input
@@ -70,6 +71,12 @@ async function main() {
       .returning(['id'])
       .executeTakeFirstOrThrow();
 
+    await db
+      .insertInto('manager_organizations')
+      .values({ manager_id: manager.id, organization_id: org.id, assigned_by: admin.id })
+      .onConflict((oc) => oc.columns(['manager_id', 'organization_id']).doNothing())
+      .execute();
+
     const start = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const yyyy = start.getUTCFullYear();
     const mm = String(start.getUTCMonth() + 1).padStart(2, '0');
@@ -101,6 +108,8 @@ async function main() {
       .onConflict((oc) => oc.column('slug').doUpdateSet({ title: eventTitle, is_published: true, is_archived: false }))
       .returning(['id'])
       .executeTakeFirstOrThrow();
+
+    await setEventTags({ db, eventId: event.id, tagNames: ['food', 'community'], createdByUserId: manager.id });
 
     // Reset shifts for idempotent seeding.
     await db.deleteFrom('shifts').where('event_id', '=', event.id).execute();

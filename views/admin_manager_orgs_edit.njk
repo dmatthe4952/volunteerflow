@@ -1,0 +1,36 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>Edit Manager Assignments</h1>
+  <div class="crumbs">
+    <a href="/admin/manager-orgs">Manager org assignments</a>
+    <span class="sep">/</span>
+    <span>{{ manager.displayName }}</span>
+  </div>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+  {% if ok %}
+    <div class="flash ok"><div>{{ ok }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="title">{{ manager.displayName }}</div>
+    <div class="meta">{{ manager.email }}</div>
+
+    <form class="form" method="post" action="/admin/manager-orgs/{{ manager.id }}" style="margin-top:12px">
+      <div class="muted" style="margin-bottom:10px">Select which organizations this manager can create new events under.</div>
+      {% for o in orgs %}
+        <label style="display:flex; gap:10px; align-items:center">
+          <input type="checkbox" name="orgIds" value="{{ o.id }}" {% if o.isAssigned %}checked{% endif %} />
+          <span>{{ o.name }}</span>
+        </label>
+      {% endfor %}
+      <div class="actions" style="margin-top:12px">
+        <button class="btn primary" type="submit">Save assignments</button>
+        <a class="btn" href="/admin/manager-orgs">Back</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}
+

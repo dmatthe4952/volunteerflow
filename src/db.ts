@@ -41,6 +41,10 @@ export interface EventsTable {
   category: EventCategory;
   is_featured: boolean;
   tags: string[];
+  location_lat: string | null;
+  location_lng: string | null;
+  purge_after_days: number | null;
+  purged_at: string | null;
   confirmation_email_note: string | null;
   description_html: string | null;
   location_name: string | null;
@@ -112,6 +116,17 @@ export interface SessionsTable {
   updated_at: Generated<string>;
 }
 
+export interface LoginAuditTable {
+  id: Generated<number>;
+  email: string;
+  attempted_role: UserRole | null;
+  user_id: string | null;
+  success: boolean;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: Generated<string>;
+}
+
 export interface VolunteerEmailTokensTable {
   id: Generated<string>;
   email: string;
@@ -148,6 +163,39 @@ export interface EventCategoriesTable {
   updated_at: Generated<string>;
 }
 
+export interface TagsTable {
+  id: Generated<string>;
+  name: string;
+  slug: string;
+  is_system: boolean;
+  created_by: string | null;
+  created_at: Generated<string>;
+  updated_at: Generated<string>;
+}
+
+export interface EventTagsTable {
+  event_id: string;
+  tag_id: string;
+  created_at: Generated<string>;
+}
+
+export interface ManagerOrganizationsTable {
+  manager_id: string;
+  organization_id: string;
+  assigned_by: string | null;
+  assigned_at: Generated<string>;
+}
+
+export interface ImpersonationLogTable {
+  id: Generated<number>;
+  admin_user_id: string;
+  manager_user_id: string;
+  started_at: Generated<string>;
+  ended_at: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+}
+
 export interface DB {
   users: UsersTable;
   organizations: OrganizationsTable;
@@ -157,8 +205,13 @@ export interface DB {
   role_templates: RoleTemplatesTable;
   signups: SignupsTable;
   sessions: SessionsTable;
+  login_audit: LoginAuditTable;
   volunteer_email_tokens: VolunteerEmailTokensTable;
   notification_sends: NotificationSendsTable;
+  tags: TagsTable;
+  event_tags: EventTagsTable;
+  manager_organizations: ManagerOrganizationsTable;
+  impersonation_log: ImpersonationLogTable;
 }
 
 export function createDb(): Kysely<DB> {

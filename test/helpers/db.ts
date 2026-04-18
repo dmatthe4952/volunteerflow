@@ -11,7 +11,11 @@ export async function resetDb(db: Kysely<DB>) {
   await db.deleteFrom('reminder_rules').execute();
   await db.deleteFrom('signups').execute();
   await db.deleteFrom('shifts').execute();
+  await db.deleteFrom('event_tags').execute();
   await db.deleteFrom('events').execute();
+  await db.deleteFrom('tags').execute();
+  await db.deleteFrom('manager_organizations').execute();
+  await db.deleteFrom('impersonation_log').execute();
   await db.deleteFrom('organizations').execute();
   await db.deleteFrom('sessions').execute();
   await db.deleteFrom('login_audit').execute();
@@ -66,6 +70,11 @@ export async function seedBasicEvent(db: Kysely<DB>) {
     })
     .returning(['id'])
     .executeTakeFirstOrThrow();
+
+  await db
+    .insertInto('manager_organizations')
+    .values({ manager_id: manager.id, organization_id: org.id, assigned_by: admin.id })
+    .execute();
 
   const today = new Date();
   const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 7));

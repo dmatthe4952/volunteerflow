@@ -77,6 +77,14 @@ describe.skipIf(!DATABASE_URL)('manager CRUD', () => {
     });
     expect(mgrRes.statusCode).toBe(303);
 
+    const adminUser = await db.selectFrom('users').select(['id']).where('email', '=', 'admin@example.com').executeTakeFirstOrThrow();
+    const managerUser = await db.selectFrom('users').select(['id']).where('email', '=', 'manager@example.com').executeTakeFirstOrThrow();
+    const orgRow = await db.selectFrom('organizations').select(['id']).where('slug', '=', 'test-org').executeTakeFirstOrThrow();
+    await db
+      .insertInto('manager_organizations')
+      .values({ manager_id: managerUser.id, organization_id: orgRow.id, assigned_by: adminUser.id })
+      .execute();
+
     // Login manager
     const mgrLogin = await app.inject({
       method: 'POST',

@@ -72,6 +72,14 @@ describe.skipIf(!DATABASE_URL)('manager shift templates', () => {
       payload: formEncode({ email: 'manager@example.com', displayName: 'Manager', password: 'correct-horse-battery-staple' })
     });
 
+    const adminUser = await db.selectFrom('users').select(['id']).where('email', '=', 'admin@example.com').executeTakeFirstOrThrow();
+    const managerUser = await db.selectFrom('users').select(['id']).where('email', '=', 'manager@example.com').executeTakeFirstOrThrow();
+    const orgRow = await db.selectFrom('organizations').select(['id']).where('slug', '=', 'test-org').executeTakeFirstOrThrow();
+    await db
+      .insertInto('manager_organizations')
+      .values({ manager_id: managerUser.id, organization_id: orgRow.id, assigned_by: adminUser.id })
+      .execute();
+
     const mgrLogin = await app.inject({
       method: 'POST',
       url: '/manager/login',
@@ -136,4 +144,3 @@ describe.skipIf(!DATABASE_URL)('manager shift templates', () => {
     expect(String(shift.end_time).slice(0, 5)).toBe('11:30');
   });
 });
-
