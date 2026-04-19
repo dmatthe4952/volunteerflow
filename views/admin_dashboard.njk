@@ -34,6 +34,7 @@
   <div class="panel" style="margin-top:16px">
     <div class="title">Impersonate manager</div>
     <form class="form" method="post" action="/admin/impersonate" style="margin-top:10px">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
       <label>
         <span>Manager name or email</span>
         <input name="query" required maxlength="120" placeholder="e.g. Alex Smith or alex@example.com" />

@@ -31,12 +31,14 @@
     <img class="event-hero" src="{{ event.imagePath }}" alt="{{ event.title }}" style="margin-top:12px" />
     {% if event.hasCustomImage %}
       <form method="post" action="/manager/events/{{ event.id }}/image/clear" style="margin-top:12px">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
         <button class="btn danger" type="submit">Remove image</button>
       </form>
     {% else %}
       <p class="muted" style="margin-top:8px">Using the default image.</p>
     {% endif %}
     <form class="form" method="post" action="/manager/events/{{ event.id }}/image" enctype="multipart/form-data">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
       <label>
         <span>Upload image</span>
         <input name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required />
@@ -49,6 +51,7 @@
 
   <div class="panel">
     <form class="form" method="post" action="/manager/events/{{ event.id }}/edit">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
       <label>
         <span>Title</span>
         <input name="title" required maxlength="200" value="{{ event.title }}" />
@@ -134,11 +137,13 @@
           </div>
           <div class="actions" style="margin-top:12px">
             <form method="post" action="/manager/shifts/{{ s.id }}/toggle" style="display:inline">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
               <button class="btn" type="submit">{% if s.isActive %}Deactivate{% else %}Activate{% endif %}</button>
             </form>
             <details style="display:inline">
               <summary class="btn">Edit</summary>
               <form class="form" method="post" action="/manager/shifts/{{ s.id }}/update">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
                 <input type="hidden" name="eventId" value="{{ event.id }}" />
                 <div class="grid2">
                   <label>
@@ -180,6 +185,7 @@
               </form>
             </details>
             <form method="post" action="/manager/shifts/{{ s.id }}/delete" style="display:inline">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
               <input type="hidden" name="eventId" value="{{ event.id }}" />
               <button class="btn danger" type="submit">Delete</button>
             </form>
@@ -192,6 +198,7 @@
   <h2 style="margin-top:18px">Add Shift</h2>
   <div class="panel">
     <form class="form" method="post" action="/manager/events/{{ event.id }}/shifts">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
       <div class="grid2">
         <label>
           <span>Role name</span>
@@ -236,6 +243,7 @@
     <h2 style="margin-top:18px">Add Shift From Template</h2>
     <div class="panel">
       <form class="form" method="post" action="/manager/events/{{ event.id }}/shifts/from-template">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
         <label>
           <span>Template</span>
           <select name="templateId" required>

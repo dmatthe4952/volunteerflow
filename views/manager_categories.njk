@@ -17,6 +17,7 @@
   <div class="panel">
     <div class="title">Add category</div>
     <form class="form" method="post" action="/manager/categories">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
       <div class="grid2">
         <label>
           <span>Name</span>
@@ -56,6 +57,7 @@
           </div>
 
           <form class="form" method="post" action="/manager/categories/{{ c.id }}">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
             <div class="grid2">
               <label>
                 <span>Name</span>

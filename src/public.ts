@@ -144,11 +144,24 @@ export async function listPublicEventTags(db: Kysely<DB>) {
 }
 
 export async function listPublicEventsFiltered(db: Kysely<DB>, params: { tag: string | null }) {
+  const nowLocal = sql`timezone(${config.timezone}, now())`;
   let q = db
     .selectFrom('events')
     .innerJoin('organizations', 'organizations.id', 'events.organization_id')
     .where('events.is_published', '=', true)
-    .where('events.is_archived', '=', false);
+    .where('events.is_archived', '=', false)
+    .where(
+      sql<boolean>`exists (
+        select 1
+        from shifts s
+        where s.event_id = events.id
+          and s.is_active = true
+          and (
+            s.shift_date > (${nowLocal})::date
+            or (s.shift_date = (${nowLocal})::date and s.start_time > (${nowLocal})::time)
+          )
+      )`
+    );
 
   if (params.tag) {
     q = q.where(
@@ -170,6 +183,7 @@ export async function listPublicEventsFiltered(db: Kysely<DB>, params: { tag: st
       'events.is_featured',
       'events.start_date',
       'events.end_date',
+      'events.updated_at',
       'events.location_name',
       'events.description_html',
       'events.image_path',
@@ -178,6 +192,9 @@ export async function listPublicEventsFiltered(db: Kysely<DB>, params: { tag: st
       'organizations.slug as organization_slug',
       'organizations.primary_color as organization_primary_color'
     ])
+    .select(
+      sql<number>`extract(epoch from events.updated_at)`.as('updated_at_epoch')
+    )
     .select(
       sql<string[]>`
         (
@@ -269,6 +286,8 @@ export async function listPublicEventsFiltered(db: Kysely<DB>, params: { tag: st
       locationName: r.location_name,
       imagePath: r.image_path ?? '/event-images/default_volunteers.png',
       cancelledAt: r.cancelled_at,
+      updatedAt: r.updated_at,
+      updatedAtEpoch: Number((r as any).updated_at_epoch ?? 0),
       openSlots,
       isFull: openSlots === 0 && maxSlots > 0
     };

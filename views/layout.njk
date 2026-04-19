@@ -42,6 +42,7 @@
             {% if currentUser %}
               {% if currentUser.impersonator %}
                 <form method="post" action="/admin/impersonation/stop" style="display:inline">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
                   <button class="btn" type="submit" style="padding:6px 10px">Stop Impersonating</button>
                 </form>
               {% endif %}

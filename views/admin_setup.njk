@@ -7,6 +7,7 @@
       <div class="flash err"><div>{{ error }}</div></div>
     {% endif %}
     <form class="form" method="post" action="/admin/setup">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
       <label>
         <span>Email</span>
         <input name="email" type="email" autocomplete="username" required />

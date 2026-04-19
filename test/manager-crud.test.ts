@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { loadAppForTest } from './helpers/env.js';
 import { migrationsDirFromRepoRoot, resetDb } from './helpers/db.js';
+import { cookieHeaderFromSetCookie, fetchCsrfToken } from './helpers/csrf.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -8,6 +9,15 @@ function formEncode(values: Record<string, string>) {
   return Object.entries(values)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join('&');
+}
+
+function ymdOffset(days: number): string {
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days));
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 describe.skipIf(!DATABASE_URL)('manager CRUD', () => {
@@ -42,6 +52,7 @@ describe.skipIf(!DATABASE_URL)('manager CRUD', () => {
   });
 
   test('manager can create event, add shift, and publish', async () => {
+    const eventDate = ymdOffset(7);
     // Create super admin via setup route
     await app.inject({
       method: 'POST',
@@ -57,14 +68,21 @@ describe.skipIf(!DATABASE_URL)('manager CRUD', () => {
       payload: formEncode({ email: 'admin@example.com', password: 'correct-horse-battery-staple' })
     });
     const adminCookieHeader = adminLogin.headers['set-cookie'];
-    const adminCookie = (Array.isArray(adminCookieHeader) ? adminCookieHeader[0] : String(adminCookieHeader ?? '')).split(';')[0];
+    const adminCookie = cookieHeaderFromSetCookie(adminCookieHeader as any);
+    const adminCsrfToken = await fetchCsrfToken(app, '/admin/organizations', adminCookie);
 
     // Create org
     const orgRes = await app.inject({
       method: 'POST',
       url: '/admin/organizations',
       headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
-      payload: formEncode({ name: 'Test Org', slug: 'test-org', primaryColor: '#4DD4AC', contactEmail: 'contact@example.com' })
+      payload: formEncode({
+        name: 'Test Org',
+        slug: 'test-org',
+        primaryColor: '#4DD4AC',
+        contactEmail: 'contact@example.com',
+        csrfToken: adminCsrfToken
+      })
     });
     expect(orgRes.statusCode).toBe(303);
 
@@ -73,7 +91,12 @@ describe.skipIf(!DATABASE_URL)('manager CRUD', () => {
       method: 'POST',
       url: '/admin/users',
       headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
-      payload: formEncode({ email: 'manager@example.com', displayName: 'Manager', password: 'correct-horse-battery-staple' })
+      payload: formEncode({
+        email: 'manager@example.com',
+        displayName: 'Manager',
+        password: 'correct-horse-battery-staple',
+        csrfToken: adminCsrfToken
+      })
     });
     expect(mgrRes.statusCode).toBe(303);
 
@@ -94,7 +117,8 @@ describe.skipIf(!DATABASE_URL)('manager CRUD', () => {
     });
     expect(mgrLogin.statusCode).toBe(303);
     const mgrCookieHeader = mgrLogin.headers['set-cookie'];
-    const mgrCookie = (Array.isArray(mgrCookieHeader) ? mgrCookieHeader[0] : String(mgrCookieHeader ?? '')).split(';')[0];
+    const mgrCookie = cookieHeaderFromSetCookie(mgrCookieHeader as any);
+    const managerCsrfToken = await fetchCsrfToken(app, '/manager/events/new', mgrCookie);
 
     const org = await db.selectFrom('organizations').select(['id']).where('slug', '=', 'test-org').executeTakeFirstOrThrow();
 
@@ -106,10 +130,11 @@ describe.skipIf(!DATABASE_URL)('manager CRUD', () => {
       payload: formEncode({
         title: 'My Test Event',
         organizationId: org.id,
-        date: '2026-04-01',
+        date: eventDate,
         description: 'Hello',
         locationName: 'Somewhere',
-        locationMapUrl: 'https://maps.example.com'
+        locationMapUrl: 'https://maps.example.com',
+        csrfToken: managerCsrfToken
       })
     });
     expect(eventRes.statusCode).toBe(303);
@@ -124,18 +149,23 @@ describe.skipIf(!DATABASE_URL)('manager CRUD', () => {
       headers: { cookie: mgrCookie, 'content-type': 'application/x-www-form-urlencoded' },
       payload: formEncode({
         roleName: 'Packing',
-        shiftDate: '2026-04-01',
+        shiftDate: eventDate,
         roleDescription: '',
         startTime: '10:00',
         durationMinutes: '60',
         minVolunteers: '0',
-        maxVolunteers: '2'
+        maxVolunteers: '2',
+        csrfToken: managerCsrfToken
       })
     });
     expect(shiftRes.statusCode).toBe(303);
 
     // Publish
-    const pubRes = await app.inject({ method: 'POST', url: `/manager/events/${eventId}/publish`, headers: { cookie: mgrCookie } });
+    const pubRes = await app.inject({
+      method: 'POST',
+      url: `/manager/events/${eventId}/publish`,
+      headers: { cookie: mgrCookie, 'x-csrf-token': managerCsrfToken }
+    });
     expect(pubRes.statusCode).toBe(303);
 
     // Public listing shows it

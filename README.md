@@ -71,6 +71,17 @@ Testing:
 - Run integration tests with Docker: `npm run test:db`
 - Cleanup test containers/volumes: `npm run test:db:clean`
 
+## Known Security Debt
+
+As of April 18, 2026, `npm audit` reports vulnerabilities that currently only resolve via `npm audit fix --force` and require breaking dependency upgrades.
+
+Current decision:
+- Defer those forced upgrades for now because the immediate regression risk is higher than the current risk profile for this stage of the project.
+- Revisit when feature work is stabilized and security-only upgrades can be isolated and validated more clearly.
+
+Reassessment trigger:
+- Re-run `npm audit` regularly and prioritize this work if severity increases, exploitability changes, or release timing allows focused regression testing.
+
 Postgres is not exposed on a host port by default; to connect from your machine, use:
 
 ```bash

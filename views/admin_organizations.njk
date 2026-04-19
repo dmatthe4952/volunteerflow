@@ -9,6 +9,7 @@
   <div class="panel">
     <h2 style="margin-top:0">Create Organization</h2>
     <form class="form" method="post" action="/admin/organizations">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
       <div class="grid2">
         <label>
           <span>Name</span>
