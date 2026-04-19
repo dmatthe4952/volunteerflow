@@ -54,7 +54,7 @@ jobs:
 
       - name: Send image notification to server
         run: |
-          curl -X POST https://${{ secrets.DEPLOY_SERVER}} \
+          curl -X POST ${{ secrets.DEPLOY_SERVER}} \
             -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d '{
