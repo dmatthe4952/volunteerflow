@@ -5,6 +5,9 @@
     <p class="half-back">Sign up for a shift -- no account required.</p>
   </div>
   <h3>Upcoming Volunteer Opportunities</h3>
+  {% if pastEventsEnabled %}
+    <p class="muted" style="margin-top:-6px"><a href="/events/past">Browse past events</a></p>
+  {% endif %}
   {% if featuredEvents.length == 0 and otherEvents.length == 0 %}
     <div class="panel">
       <p class="muted">No published events yet.</p>

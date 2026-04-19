@@ -294,6 +294,90 @@ export async function listPublicEventsFiltered(db: Kysely<DB>, params: { tag: st
   });
 }
 
+export async function listPastPublicEvents(db: Kysely<DB>) {
+  const nowLocal = sql`timezone(${config.timezone}, now())`;
+  const rows = await db
+    .selectFrom('events')
+    .innerJoin('organizations', 'organizations.id', 'events.organization_id')
+    .where('events.is_published', '=', true)
+    .where('events.is_archived', '=', false)
+    .where(
+      sql<boolean>`exists (
+        select 1
+        from shifts s
+        where s.event_id = events.id
+          and s.is_active = true
+      )`
+    )
+    .where(
+      sql<boolean>`not exists (
+        select 1
+        from shifts s
+        where s.event_id = events.id
+          and s.is_active = true
+          and (
+            s.shift_date > (${nowLocal})::date
+            or (s.shift_date = (${nowLocal})::date and s.start_time > (${nowLocal})::time)
+          )
+      )`
+    )
+    .select([
+      'events.id',
+      'events.slug',
+      'events.title',
+      'events.start_date',
+      'events.end_date',
+      'events.updated_at',
+      'events.location_name',
+      'events.description_html',
+      'events.image_path',
+      'events.cancelled_at',
+      'organizations.name as organization_name',
+      'organizations.slug as organization_slug',
+      'organizations.primary_color as organization_primary_color'
+    ])
+    .select(
+      sql<number>`extract(epoch from events.updated_at)`.as('updated_at_epoch')
+    )
+    .select(
+      sql<string[]>`
+        (
+          select coalesce(array_agg(t.name order by t.name), '{}')
+          from event_tags et
+          join tags t on t.id = et.tag_id
+          where et.event_id = events.id
+        )
+      `.as('tags')
+    )
+    .orderBy('events.end_date', 'desc')
+    .orderBy('events.title', 'asc')
+    .execute();
+
+  return rows.map((r) => {
+    const sameDay = dateKey(r.start_date) === dateKey(r.end_date);
+    const dateRange = sameDay ? formatDateShort(r.start_date) : `${formatDateShort(r.start_date)} – ${formatDateShort(r.end_date)}`;
+    const descriptionText = htmlToPlainText(r.description_html);
+    const descriptionShort = descriptionText.length > 220 ? `${descriptionText.slice(0, 217)}…` : descriptionText;
+
+    return {
+      id: r.id,
+      slug: r.slug,
+      url: eventUrl(r.slug, r.id),
+      title: r.title,
+      tags: Array.isArray((r as any).tags) ? ((r as any).tags as string[]).filter(Boolean) : [],
+      organizationName: r.organization_name,
+      dateRange,
+      description: descriptionShort,
+      descriptionHtml: r.description_html,
+      locationName: r.location_name,
+      imagePath: r.image_path ?? '/event-images/default_volunteers.png',
+      cancelledAt: r.cancelled_at,
+      updatedAt: r.updated_at,
+      updatedAtEpoch: Number((r as any).updated_at_epoch ?? 0)
+    };
+  });
+}
+
 export async function getPublicEventBySlugOrId(db: Kysely<DB>, slugOrId: string) {
   return getPublicEventBySlugOrIdForViewer(db, slugOrId, undefined);
 }

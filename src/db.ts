@@ -196,6 +196,12 @@ export interface ImpersonationLogTable {
   user_agent: string | null;
 }
 
+export interface SystemSettingsTable {
+  key: string;
+  value_encrypted: Buffer;
+  updated_at: Generated<string>;
+}
+
 export interface DB {
   users: UsersTable;
   organizations: OrganizationsTable;
@@ -212,6 +218,7 @@ export interface DB {
   event_tags: EventTagsTable;
   manager_organizations: ManagerOrganizationsTable;
   impersonation_log: ImpersonationLogTable;
+  system_settings: SystemSettingsTable;
 }
 
 export function createDb(): Kysely<DB> {

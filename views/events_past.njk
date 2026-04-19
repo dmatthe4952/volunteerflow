@@ -1,0 +1,49 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <div class="crumbs">
+    <a href="/">All events</a>
+    <span class="sep">/</span>
+    <span>Past events</span>
+  </div>
+
+  <div class="bb">
+    <h1>Past Events</h1>
+    <p class="half-back">Archived opportunities you can no longer sign up for.</p>
+  </div>
+
+  {% if events.length == 0 %}
+    <div class="panel">
+      <p class="muted">No past events to show.</p>
+    </div>
+  {% else %}
+    <div class="grid">
+      {% for event in events %}
+        <a class="card" href="{{ event.url }}">
+          <img class="card-img" src="{{ event.imagePath }}" alt="{{ event.title }}" />
+          <div class="card-hd">
+            <div class="title">{{ event.title }}</div>
+          </div>
+          <div class="card-bd">
+            <div class="card-meta">
+              <div class="card-date">{{ event.dateRange }}</div>
+              <div class="right" style="gap:6px; flex-wrap:wrap; justify-content:flex-end">
+                {% for t in event.tags %}
+                  <span class="badge tag">{{ t }}</span>
+                {% endfor %}
+              </div>
+            </div>
+            {% if event.locationName %}
+              <div class="muted" style="margin-bottom:8px">{{ event.locationName }}</div>
+            {% endif %}
+            {% if event.descriptionHtml %}
+              <div class="card-desc">{{ event.descriptionHtml | safe }}</div>
+            {% elseif event.description %}
+              <div class="card-desc">{{ event.description }}</div>
+            {% endif %}
+            <div class="card-cta" aria-hidden="true">View Event Details</div>
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}

@@ -32,6 +32,25 @@
   </div>
 
   <div class="panel" style="margin-top:16px">
+    <div class="title">Public archive</div>
+    <p class="muted" style="margin-top:8px">
+      Past events page is currently:
+      <strong>{% if pastEventsEnabled %}Enabled{% else %}Disabled{% endif %}</strong>
+    </p>
+    <form class="form" method="post" action="/admin/settings/past-events" style="margin-top:10px">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+      <input type="hidden" name="enabled" value="{% if pastEventsEnabled %}false{% else %}true{% endif %}" />
+      <div class="actions">
+        {% if pastEventsEnabled %}
+          <button class="btn" type="submit">Disable Past Events Page</button>
+        {% else %}
+          <button class="btn primary" type="submit">Enable Past Events Page</button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
     <div class="title">Impersonate manager</div>
     <form class="form" method="post" action="/admin/impersonate" style="margin-top:10px">
       <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />

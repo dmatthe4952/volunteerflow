@@ -22,6 +22,7 @@ import {
   getPublicEventBySlugOrIdForViewer,
   listPublicEventTags,
   listPublicEventsFiltered,
+  listPastPublicEvents,
   listViewerActiveSignups,
   requestMySignupsToken,
   verifyMySignupsToken
@@ -198,6 +199,47 @@ export async function buildApp(params: {
       log: (line) => app.log.info(line)
     });
   }
+
+  const SYSTEM_SETTING_PAST_EVENTS_ENABLED = 'PAST_EVENTS_ENABLED';
+  const defaultPastEventsEnabled = config.env === 'staging' || config.env === 'development' || config.env === 'test';
+
+  function parseBooleanSetting(raw: string | null): boolean | null {
+    if (raw == null) return null;
+    const v = String(raw).trim().toLowerCase();
+    if (v === '1' || v === 'true') return true;
+    if (v === '0' || v === 'false') return false;
+    return null;
+  }
+
+  async function getSystemSetting(key: string): Promise<string | null> {
+    const row = await params.db
+      .selectFrom('system_settings')
+      .select((eb) => sql<string>`convert_from(${eb.ref('value_encrypted')}::bytea, 'UTF8')`.as('value'))
+      .where('key', '=', key)
+      .executeTakeFirst();
+    return row?.value ?? null;
+  }
+
+  async function setSystemSetting(key: string, value: string) {
+    await params.db
+      .insertInto('system_settings')
+      .values({ key, value_encrypted: sql<Buffer>`convert_to(${value}, 'UTF8')` as any })
+      .onConflict((oc) => oc.column('key').doUpdateSet({ value_encrypted: sql<Buffer>`convert_to(${value}, 'UTF8')`, updated_at: sql`now()` }))
+      .execute();
+  }
+
+  async function getPastEventsEnabled(): Promise<boolean> {
+    const parsed = parseBooleanSetting(await getSystemSetting(SYSTEM_SETTING_PAST_EVENTS_ENABLED));
+    if (parsed != null) return parsed;
+    await setSystemSetting(SYSTEM_SETTING_PAST_EVENTS_ENABLED, defaultPastEventsEnabled ? 'true' : 'false');
+    return defaultPastEventsEnabled;
+  }
+
+  async function ensureSystemSettingsOnStartup() {
+    await getPastEventsEnabled();
+  }
+
+  await ensureSystemSettingsOnStartup();
 
   await app.register(rateLimit, { max: 200, timeWindow: '1 minute' });
   await app.register(cookie, { secret: config.sessionSecret });
@@ -479,7 +521,27 @@ export async function buildApp(params: {
     const featuredIds = new Set(featuredEvents.map((e: any) => String(e.id)));
     const otherEvents = events.filter((e: any) => !featuredIds.has(String(e.id)));
     const showSeedHint = config.env === 'development' || config.env === 'test';
-    return render(reply, 'index.njk', { featuredEvents, otherEvents, showSeedHint, navAddEventOnly: true, navTags, tag });
+    const pastEventsEnabled = await getPastEventsEnabled();
+    return render(reply, 'index.njk', {
+      featuredEvents,
+      otherEvents,
+      showSeedHint,
+      navAddEventOnly: true,
+      navTags,
+      tag,
+      pastEventsEnabled
+    });
+  });
+
+  app.get('/events/past', async (_req, reply) => {
+    const pastEventsEnabled = await getPastEventsEnabled();
+    if (!pastEventsEnabled) return reply.code(404).view('not_found.njk', { message: 'Not found.' });
+
+    const events = await listPastPublicEvents(params.db);
+    return render(reply, 'events_past.njk', {
+      events,
+      navAddEventOnly: true
+    });
   });
 
   app.get('/add-event', async (req, reply) => {
@@ -992,9 +1054,11 @@ export async function buildApp(params: {
       .orderBy('il.started_at', 'desc')
       .limit(10)
       .execute();
+    const pastEventsEnabled = await getPastEventsEnabled();
     return render(reply, 'admin_dashboard.njk', {
       ok,
       error,
+      pastEventsEnabled,
       stats: {
         events: Number(events?.c ?? 0),
         upcomingShifts: Number(upcomingShifts?.c ?? 0),
@@ -1022,6 +1086,15 @@ export async function buildApp(params: {
         managerEmail: row.manager_email
       }))
     });
+  });
+
+  app.post('/admin/settings/past-events', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const enabled = String(body.enabled ?? '').trim().toLowerCase() === 'true';
+    await setSystemSetting(SYSTEM_SETTING_PAST_EVENTS_ENABLED, enabled ? 'true' : 'false');
+    const msg = enabled ? 'Past events archive enabled.' : 'Past events archive disabled.';
+    return reply.code(303).redirect(`/admin/dashboard?ok=${encodeURIComponent(msg)}`);
   });
 
   app.post('/admin/impersonate', async (req, reply) => {
