@@ -80,6 +80,10 @@ function readSignedCookie(req: any, name: string): string | null {
   return null;
 }
 
+function createCsrfToken(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
+
 export async function buildApp(params: {
   db: Kysely<DB>;
   projectRoot?: string;
@@ -217,6 +221,30 @@ export async function buildApp(params: {
     }
   });
 
+  app.addHook('preHandler', async (req, reply) => {
+    const method = String(req.method ?? 'GET').toUpperCase();
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return;
+
+    const pathOnly = String(req.url ?? '').split('?')[0] ?? '';
+    if (!pathOnly.startsWith('/admin') && !pathOnly.startsWith('/manager')) return;
+
+    if (pathOnly === '/admin/setup' || pathOnly === '/admin/login' || pathOnly === '/manager/login') return;
+
+    const currentUser = (req as any).currentUser;
+    if (!currentUser || (currentUser.role !== 'super_admin' && currentUser.role !== 'event_manager')) return;
+
+    const expectedToken = readSignedCookie(req, 'vf_csrf');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const bodyToken = typeof body.csrfToken === 'string' ? body.csrfToken : '';
+    const headerTokenRaw = req.headers['x-csrf-token'];
+    const headerToken = typeof headerTokenRaw === 'string' ? headerTokenRaw : '';
+    const providedToken = bodyToken || headerToken;
+
+    if (!expectedToken || !providedToken || providedToken !== expectedToken) {
+      return reply.code(403).view('error.njk', { message: 'Invalid CSRF token. Please refresh and try again.' });
+    }
+  });
+
   await app.register(statik, {
     root: path.join(projectRoot, 'public'),
     prefix: '/public/'
@@ -244,7 +272,22 @@ export async function buildApp(params: {
 
   async function render(reply: any, template: string, data: any) {
     const currentUser = (reply.request as any).currentUser ?? null;
-    return reply.view(template, { ...data, currentUser });
+    let csrfToken: string | null = null;
+    if (currentUser && (currentUser.role === 'super_admin' || currentUser.role === 'event_manager')) {
+      csrfToken = readSignedCookie(reply.request, 'vf_csrf');
+      if (!csrfToken) {
+        csrfToken = createCsrfToken();
+        reply.setCookie('vf_csrf', csrfToken, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: config.env !== 'development',
+          signed: true,
+          maxAge: 60 * 60 * 24 * 30
+        });
+      }
+    }
+    return reply.view(template, { ...data, currentUser, csrfToken });
   }
 
   function requireRole(req: any, role: 'super_admin' | 'event_manager') {
@@ -813,6 +856,14 @@ export async function buildApp(params: {
       signed: true,
       maxAge: 60 * 60 * 24 * 30
     });
+    reply.setCookie('vf_csrf', createCsrfToken(), {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: config.env !== 'development',
+      signed: true,
+      maxAge: 60 * 60 * 24 * 30
+    });
     return reply.code(303).redirect('/admin/dashboard');
   });
 
@@ -854,6 +905,14 @@ export async function buildApp(params: {
       signed: true,
       maxAge: 60 * 60 * 24 * 30
     });
+    reply.setCookie('vf_csrf', createCsrfToken(), {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: config.env !== 'development',
+      signed: true,
+      maxAge: 60 * 60 * 24 * 30
+    });
     return reply.code(303).redirect('/manager/dashboard');
   });
 
@@ -868,6 +927,7 @@ export async function buildApp(params: {
       }
     }
     reply.clearCookie('vf_sess', { path: '/', signed: true });
+    reply.clearCookie('vf_csrf', { path: '/', signed: true });
     return reply.code(303).redirect('/');
   });
 

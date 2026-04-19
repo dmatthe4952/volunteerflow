@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { loadAppForTest } from './helpers/env.js';
 import { migrationsDirFromRepoRoot, resetDb } from './helpers/db.js';
+import { cookieHeaderFromSetCookie, fetchCsrfToken } from './helpers/csrf.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -35,6 +36,7 @@ describe.skipIf(!DATABASE_URL)('manager shift edit/delete', () => {
   let db: any;
   let app: any;
   let mgrCookie: string;
+  let managerCsrfToken: string;
   let eventId: string;
   let shiftId: string;
 
@@ -57,20 +59,32 @@ describe.skipIf(!DATABASE_URL)('manager shift edit/delete', () => {
       payload: formEncode({ email: 'admin@example.com', password: 'correct-horse-battery-staple' })
     });
     const adminCookieHeader = adminLogin.headers['set-cookie'];
-    const adminCookie = (Array.isArray(adminCookieHeader) ? adminCookieHeader[0] : String(adminCookieHeader ?? '')).split(';')[0];
+    const adminCookie = cookieHeaderFromSetCookie(adminCookieHeader as any);
+    const adminCsrfToken = await fetchCsrfToken(app, '/admin/organizations', adminCookie);
 
     await app.inject({
       method: 'POST',
       url: '/admin/organizations',
       headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
-      payload: formEncode({ name: 'Test Org', slug: 'test-org', primaryColor: '#4DD4AC', contactEmail: 'contact@example.com' })
+      payload: formEncode({
+        name: 'Test Org',
+        slug: 'test-org',
+        primaryColor: '#4DD4AC',
+        contactEmail: 'contact@example.com',
+        csrfToken: adminCsrfToken
+      })
     });
 
     await app.inject({
       method: 'POST',
       url: '/admin/users',
       headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
-      payload: formEncode({ email: 'manager@example.com', displayName: 'Manager', password: 'correct-horse-battery-staple' })
+      payload: formEncode({
+        email: 'manager@example.com',
+        displayName: 'Manager',
+        password: 'correct-horse-battery-staple',
+        csrfToken: adminCsrfToken
+      })
     });
 
     const adminUser = await db.selectFrom('users').select(['id']).where('email', '=', 'admin@example.com').executeTakeFirstOrThrow();
@@ -88,7 +102,8 @@ describe.skipIf(!DATABASE_URL)('manager shift edit/delete', () => {
       payload: formEncode({ email: 'manager@example.com', password: 'correct-horse-battery-staple' })
     });
     const mgrCookieHeader = mgrLogin.headers['set-cookie'];
-    mgrCookie = (Array.isArray(mgrCookieHeader) ? mgrCookieHeader[0] : String(mgrCookieHeader ?? '')).split(';')[0];
+    mgrCookie = cookieHeaderFromSetCookie(mgrCookieHeader as any);
+    managerCsrfToken = await fetchCsrfToken(app, '/manager/events/new', mgrCookie);
 
     const org = await db.selectFrom('organizations').select(['id']).where('slug', '=', 'test-org').executeTakeFirstOrThrow();
     const eventRes = await app.inject({
@@ -101,7 +116,8 @@ describe.skipIf(!DATABASE_URL)('manager shift edit/delete', () => {
         date: '2026-04-01',
         description: 'Hello',
         locationName: 'Somewhere',
-        locationMapUrl: 'https://maps.example.com'
+        locationMapUrl: 'https://maps.example.com',
+        csrfToken: managerCsrfToken
       })
     });
     eventId = String(eventRes.headers.location).split('/')[3];
@@ -117,7 +133,8 @@ describe.skipIf(!DATABASE_URL)('manager shift edit/delete', () => {
         startTime: '10:00',
         durationMinutes: '60',
         minVolunteers: '0',
-        maxVolunteers: '2'
+        maxVolunteers: '2',
+        csrfToken: managerCsrfToken
       })
     });
 
@@ -138,7 +155,8 @@ describe.skipIf(!DATABASE_URL)('manager shift edit/delete', () => {
         startTime: '10:00',
         durationMinutes: '90',
         minVolunteers: '0',
-        maxVolunteers: '3'
+        maxVolunteers: '3',
+        csrfToken: managerCsrfToken
       })
     });
     expect(updateRes.statusCode).toBe(303);
@@ -158,14 +176,14 @@ describe.skipIf(!DATABASE_URL)('manager shift edit/delete', () => {
       method: 'POST',
       url: `/manager/events/${eventId}/signups/add`,
       headers: { cookie: mgrCookie, 'content-type': 'application/x-www-form-urlencoded' },
-      payload: formEncode({ shiftId, firstName: 'Ada', lastName: 'L', email: 'ada@example.com' })
+      payload: formEncode({ shiftId, firstName: 'Ada', lastName: 'L', email: 'ada@example.com', csrfToken: managerCsrfToken })
     });
 
     const delRes = await app.inject({
       method: 'POST',
       url: `/manager/shifts/${shiftId}/delete`,
       headers: { cookie: mgrCookie, 'content-type': 'application/x-www-form-urlencoded' },
-      payload: formEncode({ eventId })
+      payload: formEncode({ eventId, csrfToken: managerCsrfToken })
     });
     expect(delRes.statusCode).toBe(303);
 
@@ -185,7 +203,8 @@ describe.skipIf(!DATABASE_URL)('manager shift edit/delete', () => {
         startTime: '12:00',
         durationMinutes: '60',
         minVolunteers: '0',
-        maxVolunteers: '1'
+        maxVolunteers: '1',
+        csrfToken: managerCsrfToken
       })
     });
     expect(addRes.statusCode).toBe(303);
@@ -201,7 +220,7 @@ describe.skipIf(!DATABASE_URL)('manager shift edit/delete', () => {
       method: 'POST',
       url: `/manager/shifts/${extra.id}/delete`,
       headers: { cookie: mgrCookie, 'content-type': 'application/x-www-form-urlencoded' },
-      payload: formEncode({ eventId })
+      payload: formEncode({ eventId, csrfToken: managerCsrfToken })
     });
     expect(delRes.statusCode).toBe(303);
 

@@ -18,6 +18,7 @@
 
   <div class="panel">
     <form class="form" method="post" action="/manager/templates/{{ template.id }}/edit">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
       <label>
         <span>Role name</span>
         <input name="roleName" required maxlength="120" value="{{ template.roleName }}" />
@@ -51,6 +52,7 @@
     <div class="title">Danger zone</div>
     <div class="actions" style="margin-top:12px">
       <form method="post" action="/manager/templates/{{ template.id }}/delete">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
         <button class="btn danger" type="submit">Delete template</button>
       </form>
     </div>

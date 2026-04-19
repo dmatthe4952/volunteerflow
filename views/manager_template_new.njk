@@ -15,6 +15,7 @@
 
   <div class="panel">
     <form class="form" method="post" action="/manager/templates/new">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
       <label>
         <span>Role name</span>
         <input name="roleName" required maxlength="120" value="{{ template and template.roleName or '' }}" />

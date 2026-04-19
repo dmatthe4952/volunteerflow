@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { loadAppForTest } from './helpers/env.js';
 import { migrationsDirFromRepoRoot, resetDb } from './helpers/db.js';
+import { cookieHeaderFromSetCookie, fetchCsrfToken } from './helpers/csrf.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -66,20 +67,32 @@ describe.skipIf(!DATABASE_URL)('manager archive', () => {
       payload: formEncode({ email: 'admin@example.com', password: 'correct-horse-battery-staple' })
     });
     const adminCookieHeader = adminLogin.headers['set-cookie'];
-    const adminCookie = (Array.isArray(adminCookieHeader) ? adminCookieHeader[0] : String(adminCookieHeader ?? '')).split(';')[0];
+    const adminCookie = cookieHeaderFromSetCookie(adminCookieHeader as any);
+    const adminCsrfToken = await fetchCsrfToken(app, '/admin/organizations', adminCookie);
 
     await app.inject({
       method: 'POST',
       url: '/admin/organizations',
       headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
-      payload: formEncode({ name: 'Test Org', slug: 'test-org', primaryColor: '#4DD4AC', contactEmail: 'contact@example.com' })
+      payload: formEncode({
+        name: 'Test Org',
+        slug: 'test-org',
+        primaryColor: '#4DD4AC',
+        contactEmail: 'contact@example.com',
+        csrfToken: adminCsrfToken
+      })
     });
 
     await app.inject({
       method: 'POST',
       url: '/admin/users',
       headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
-      payload: formEncode({ email: 'manager@example.com', displayName: 'Manager', password: 'correct-horse-battery-staple' })
+      payload: formEncode({
+        email: 'manager@example.com',
+        displayName: 'Manager',
+        password: 'correct-horse-battery-staple',
+        csrfToken: adminCsrfToken
+      })
     });
 
     const adminUser = await db.selectFrom('users').select(['id']).where('email', '=', 'admin@example.com').executeTakeFirstOrThrow();
@@ -97,7 +110,8 @@ describe.skipIf(!DATABASE_URL)('manager archive', () => {
       payload: formEncode({ email: 'manager@example.com', password: 'correct-horse-battery-staple' })
     });
     const mgrCookieHeader = mgrLogin.headers['set-cookie'];
-    const mgrCookie = (Array.isArray(mgrCookieHeader) ? mgrCookieHeader[0] : String(mgrCookieHeader ?? '')).split(';')[0];
+    const mgrCookie = cookieHeaderFromSetCookie(mgrCookieHeader as any);
+    const managerCsrfToken = await fetchCsrfToken(app, '/manager/events/new', mgrCookie);
 
     const org = await db.selectFrom('organizations').select(['id']).where('slug', '=', 'test-org').executeTakeFirstOrThrow();
 
@@ -111,7 +125,8 @@ describe.skipIf(!DATABASE_URL)('manager archive', () => {
         date: eventDate,
         description: 'Hello',
         locationName: 'Somewhere',
-        locationMapUrl: 'https://maps.example.com'
+        locationMapUrl: 'https://maps.example.com',
+        csrfToken: managerCsrfToken
       })
     });
     expect(eventRes.statusCode).toBe(303);
@@ -128,18 +143,27 @@ describe.skipIf(!DATABASE_URL)('manager archive', () => {
         startTime: '10:00',
         durationMinutes: '60',
         minVolunteers: '0',
-        maxVolunteers: '2'
+        maxVolunteers: '2',
+        csrfToken: managerCsrfToken
       })
     });
 
-    const pubRes = await app.inject({ method: 'POST', url: `/manager/events/${eventId}/publish`, headers: { cookie: mgrCookie } });
+    const pubRes = await app.inject({
+      method: 'POST',
+      url: `/manager/events/${eventId}/publish`,
+      headers: { cookie: mgrCookie, 'x-csrf-token': managerCsrfToken }
+    });
     expect(pubRes.statusCode).toBe(303);
 
     const publicList1 = await app.inject({ method: 'GET', url: '/' });
     expect(publicList1.statusCode).toBe(200);
     expect(publicList1.body).toContain('Archived Event');
 
-    const archiveRes = await app.inject({ method: 'POST', url: `/manager/events/${eventId}/archive`, headers: { cookie: mgrCookie } });
+    const archiveRes = await app.inject({
+      method: 'POST',
+      url: `/manager/events/${eventId}/archive`,
+      headers: { cookie: mgrCookie, 'x-csrf-token': managerCsrfToken }
+    });
     expect(archiveRes.statusCode).toBe(303);
 
     const row = await db
@@ -154,11 +178,15 @@ describe.skipIf(!DATABASE_URL)('manager archive', () => {
     expect(publicList2.statusCode).toBe(200);
     expect(publicList2.body).not.toContain('Archived Event');
 
-    const dashboard = await app.inject({ method: 'GET', url: '/manager/dashboard', headers: { cookie: mgrCookie } });
+    const dashboard = await app.inject({ method: 'GET', url: '/manager/events/new', headers: { cookie: mgrCookie } });
     expect(dashboard.statusCode).toBe(200);
     expect(dashboard.body).not.toContain('Archived Event');
 
-    const publishWhileArchived = await app.inject({ method: 'POST', url: `/manager/events/${eventId}/publish`, headers: { cookie: mgrCookie } });
+    const publishWhileArchived = await app.inject({
+      method: 'POST',
+      url: `/manager/events/${eventId}/publish`,
+      headers: { cookie: mgrCookie, 'x-csrf-token': managerCsrfToken }
+    });
     expect(publishWhileArchived.statusCode).toBe(303);
     expect(String(publishWhileArchived.headers.location)).toContain('err=');
 
@@ -167,7 +195,11 @@ describe.skipIf(!DATABASE_URL)('manager archive', () => {
     expect(eventsPageArchived.body).toContain('Archived');
     expect(eventsPageArchived.body).toContain('Archived Event');
 
-    const unarchiveRes = await app.inject({ method: 'POST', url: `/manager/events/${eventId}/unarchive`, headers: { cookie: mgrCookie } });
+    const unarchiveRes = await app.inject({
+      method: 'POST',
+      url: `/manager/events/${eventId}/unarchive`,
+      headers: { cookie: mgrCookie, 'x-csrf-token': managerCsrfToken }
+    });
     expect(unarchiveRes.statusCode).toBe(303);
 
     const eventsPageUnarchived = await app.inject({ method: 'GET', url: '/manager/events', headers: { cookie: mgrCookie } });

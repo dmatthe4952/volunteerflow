@@ -27,6 +27,7 @@
     <div class="panel">
       <p class="muted">This will mark the event as cancelled and notify all active signups for the event.</p>
       <form class="form" method="post" action="/manager/events/{{ event.id }}/cancel">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
         <label>
           <span>Cancellation message (sent to volunteers)</span>
           <textarea name="message" rows="5" required maxlength="4000" placeholder="Reason for cancellation…"></textarea>

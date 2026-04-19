@@ -7,6 +7,7 @@
 
   <div class="panel">
     <form class="form" method="post" action="/manager/events/new">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
       <label>
         <span>Title</span>
         <input name="title" required maxlength="200" />
