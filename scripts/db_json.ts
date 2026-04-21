@@ -183,6 +183,22 @@ async function getTableColumns(client: PoolClient, table: string): Promise<strin
   return res.rows.map((r) => r.column_name);
 }
 
+async function getInsertableColumns(client: PoolClient, table: string): Promise<string[]> {
+  const res = await client.query<{ column_name: string }>(
+    `
+      select column_name
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = $1
+        and coalesce(is_generated, 'NEVER') <> 'ALWAYS'
+        and coalesce(identity_generation, '') <> 'ALWAYS'
+      order by ordinal_position asc
+    `,
+    [table]
+  );
+  return res.rows.map((r) => r.column_name);
+}
+
 function nowStamp(): string {
   const d = new Date();
   const yyyy = d.getUTCFullYear();
@@ -283,6 +299,8 @@ export async function restoreDatabaseFromJson(params: { databaseUrl: string; fil
         const tableDump = payload.tables[table];
         const rows = Array.isArray(tableDump?.rows) ? tableDump.rows : [];
         const columns = Array.isArray(tableDump?.columns) ? tableDump.columns : [];
+        const insertableColumns = await getInsertableColumns(client, table);
+        const restoreColumns = columns.filter((c) => insertableColumns.includes(c));
 
         if (rows.length === 0) {
           rowCounts[table] = 0;
@@ -291,6 +309,9 @@ export async function restoreDatabaseFromJson(params: { databaseUrl: string; fil
         if (columns.length === 0) {
           throw new Error(`Backup table ${table} has rows but no column list.`);
         }
+        if (restoreColumns.length === 0) {
+          throw new Error(`Table ${table} has no insertable columns for restore.`);
+        }
 
         for (const batch of chunk(rows, batchSize)) {
           const values: unknown[] = [];
@@ -298,7 +319,7 @@ export async function restoreDatabaseFromJson(params: { databaseUrl: string; fil
           for (const row of batch) {
             const decoded = (row ?? {}) as Record<string, unknown>;
             const slotSql: string[] = [];
-            for (const col of columns) {
+            for (const col of restoreColumns) {
               values.push(decodeValue(decoded[col]));
               slotSql.push(`$${values.length}`);
             }
@@ -306,7 +327,7 @@ export async function restoreDatabaseFromJson(params: { databaseUrl: string; fil
           }
 
           const insertSql = `
-            insert into ${qident('public')}.${qident(table)} (${columns.map(qident).join(', ')})
+            insert into ${qident('public')}.${qident(table)} (${restoreColumns.map(qident).join(', ')})
             values ${valueSql.join(', ')}
           `;
           await client.query(insertSql, values);
