@@ -66,6 +66,15 @@ docker compose exec app npm run seed
 
 `seed` prints dev admin/manager credentials (for `/admin/login` and `/manager/login`) to stdout.
 
+Database backup / recovery helpers:
+
+- Create JSON backup (timestamped under `./backups`): `npm run db:backup:json`
+- Restore from JSON backup (destructive, requires confirmation): `npm run db:restore:json -- --file ./backups/<file>.json`
+- Initialize DB with recovery choice:
+  - interactive: `npm run db:init`
+  - non-interactive empty init: `npm run db:init -- --mode empty`
+  - non-interactive restore: `npm run db:init -- --mode restore --file ./backups/<file>.json --yes`
+
 Testing:
 
 - Run integration tests with Docker: `npm run test:db`

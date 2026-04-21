@@ -11,9 +11,24 @@ const appEnv = process.env.APP_ENV || 'development';
 const cmd = process.argv[2];
 const args = process.argv.slice(3);
 
-if (!cmd || !['migrate', 'seed', 'set-password', 'archive-events', 'send-reminders', 'geocode-events'].includes(cmd)) {
+if (
+  !cmd ||
+  ![
+    'migrate',
+    'seed',
+    'set-password',
+    'archive-events',
+    'send-reminders',
+    'geocode-events',
+    'db-backup-json',
+    'db-restore-json',
+    'db-init'
+  ].includes(cmd)
+) {
   // eslint-disable-next-line no-console
-  console.error('Usage: node scripts/run.mjs <migrate|seed|set-password|archive-events|send-reminders|geocode-events> [args...]');
+  console.error(
+    'Usage: node scripts/run.mjs <migrate|seed|set-password|archive-events|send-reminders|geocode-events|db-backup-json|db-restore-json|db-init> [args...]'
+  );
   process.exit(2);
 }
 
@@ -37,7 +52,10 @@ function runTs() {
     'set-password': 'set_password.ts',
     'archive-events': 'archive_events.ts',
     'send-reminders': 'send_reminders.ts',
-    'geocode-events': 'geocode_events.ts'
+    'geocode-events': 'geocode_events.ts',
+    'db-backup-json': 'db_backup_json.ts',
+    'db-restore-json': 'db_restore_json.ts',
+    'db-init': 'db_init.ts'
   };
   const target = path.join(projectRoot, 'scripts', scriptMap[cmd]);
   const child = spawn(process.execPath, ['--import', 'tsx', target, ...args], { stdio: 'inherit' });
