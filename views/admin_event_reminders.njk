@@ -1,0 +1,116 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>Event Reminder Rules</h1>
+  <div class="crumbs">
+    <a href="/admin/dashboard">Admin</a>
+    <span class="sep">/</span>
+    <a href="/admin/events">Events</a>
+    <span class="sep">/</span>
+    <span>{{ event.title }}</span>
+  </div>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+  {% if ok %}
+    <div class="flash ok"><div>{{ ok }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="title">{{ event.title }}</div>
+    <div class="meta">{{ event.organizationName }} • {{ event.dateRange }}</div>
+    <div class="muted" style="margin-top:8px">Manager: {{ event.managerEmail }}</div>
+    <div class="actions" style="margin-top:12px">
+      <a class="btn" href="{{ event.publicUrl }}">View Public Event</a>
+      <a class="btn" href="/admin/events">Back to Events</a>
+    </div>
+  </div>
+
+  <h2 style="margin-top:18px">Reminder Rules</h2>
+  <div class="panel">
+    <p class="muted">Set up to 3 reminder rules per event. Offsets are in hours before shift start.</p>
+    {% if reminderRules and reminderRules.length > 0 %}
+      <div class="stack" style="margin-top:12px">
+        {% for r in reminderRules %}
+          <details class="panel" style="margin:0">
+            <summary style="cursor:pointer">
+              <strong>{{ r.sendOffsetHours }}h</strong>
+              {% if r.isActive %}
+                <span class="badge" style="margin-left:8px">Active</span>
+              {% else %}
+                <span class="badge" style="margin-left:8px">Inactive</span>
+              {% endif %}
+              <span class="muted" style="margin-left:8px">{{ r.subjectTemplate }}</span>
+            </summary>
+            <form class="form" method="post" action="/admin/events/{{ event.id }}/reminders/{{ r.id }}/update" style="margin-top:10px">
+              <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+              <div class="grid2">
+                <label>
+                  <span>Offset (hours)</span>
+                  <input name="sendOffsetHours" type="number" min="0" max="336" step="1" required value="{{ r.sendOffsetHours }}" />
+                </label>
+                <label>
+                  <span>Active?</span>
+                  <input name="isActive" type="checkbox" {% if r.isActive %}checked{% endif %} />
+                </label>
+              </div>
+              <label>
+                <span>Subject template</span>
+                <input name="subjectTemplate" maxlength="300" required value="{{ r.subjectTemplate }}" />
+              </label>
+              <label>
+                <span>Body template</span>
+                <textarea name="bodyTemplate" rows="4" maxlength="20000" required>{{ r.bodyTemplate }}</textarea>
+              </label>
+              <div class="actions">
+                <button class="btn primary" type="submit">Save Rule</button>
+              </div>
+            </form>
+            <form method="post" action="/admin/events/{{ event.id }}/reminders/{{ r.id }}/delete" style="margin-top:10px">
+              <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+              <button class="btn danger" type="submit">Delete Rule</button>
+            </form>
+          </details>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if (not reminderRules) or reminderRules.length < 3 %}
+      <form class="form" method="post" action="/admin/events/{{ event.id }}/reminders" style="margin-top:14px">
+        <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+        <div class="grid2">
+          <label>
+            <span>Offset (hours)</span>
+            <input name="sendOffsetHours" type="number" min="0" max="336" step="1" required value="24" />
+          </label>
+          <label>
+            <span>Active?</span>
+            <input name="isActive" type="checkbox" checked />
+          </label>
+        </div>
+        <label>
+          <span>Subject template</span>
+          <input name="subjectTemplate" maxlength="300" required value="Reminder: {{event_title}} ({{shift_date}} {{shift_start_time}})" />
+        </label>
+        <label>
+          <span>Body template</span>
+          <textarea name="bodyTemplate" rows="4" maxlength="20000" required>Hi {{volunteer_first_name}},
+
+This is a reminder for your upcoming shift: {{shift_role}} at {{event_title}}.
+
+When: {{shift_date}} {{shift_start_time}} - {{shift_end_time}}
+Where: {{location_name}}
+Event page: {{event_url}}
+Cancel: {{cancel_url}}
+
+- LocalShifts</textarea>
+        </label>
+        <div class="actions">
+          <button class="btn primary" type="submit">Add Reminder Rule</button>
+        </div>
+      </form>
+    {% else %}
+      <p class="muted" style="margin-top:12px">Maximum reached (3 rules).</p>
+    {% endif %}
+  </div>
+{% endblock %}

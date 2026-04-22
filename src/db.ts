@@ -90,6 +90,24 @@ export interface RoleTemplatesTable {
   updated_at: Generated<string>;
 }
 
+export interface ReminderRulesTable {
+  id: Generated<string>;
+  event_id: string;
+  send_offset_hours: number;
+  subject_template: string;
+  body_template: string;
+  is_active: boolean;
+  created_at: Generated<string>;
+  updated_at: Generated<string>;
+}
+
+export interface SentRemindersTable {
+  id: Generated<string>;
+  signup_id: string;
+  reminder_rule_id: string;
+  sent_at: Generated<string>;
+}
+
 export interface SignupsTable {
   id: Generated<string>;
   shift_id: string;
@@ -209,6 +227,8 @@ export interface DB {
   event_categories: EventCategoriesTable;
   shifts: ShiftsTable;
   role_templates: RoleTemplatesTable;
+  reminder_rules: ReminderRulesTable;
+  sent_reminders: SentRemindersTable;
   signups: SignupsTable;
   sessions: SessionsTable;
   login_audit: LoginAuditTable;

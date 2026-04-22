@@ -1687,6 +1687,176 @@ export async function buildApp(params: {
     });
   });
 
+  app.get('/admin/events/:id/reminders', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const { id } = req.params as { id: string };
+    const qs = req.query as Record<string, string | undefined>;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+
+    const event = await params.db
+      .selectFrom('events')
+      .innerJoin('organizations', 'organizations.id', 'events.organization_id')
+      .innerJoin('users', 'users.id', 'events.manager_id')
+      .select([
+        'events.id',
+        'events.title',
+        'events.slug',
+        'events.start_date',
+        'events.end_date',
+        'organizations.name as organization_name',
+        'users.email as manager_email'
+      ])
+      .where('events.id', '=', id)
+      .executeTakeFirst();
+    if (!event) return reply.code(404).view('not_found.njk', { message: 'Event not found.' });
+
+    const reminderRules = await params.db
+      .selectFrom('reminder_rules')
+      .select(['id', 'send_offset_hours', 'subject_template', 'body_template', 'is_active'])
+      .where('event_id', '=', id)
+      .orderBy('send_offset_hours', 'asc')
+      .execute();
+
+    const start = toDateOnly(event.start_date);
+    const end = toDateOnly(event.end_date);
+
+    return render(reply, 'admin_event_reminders.njk', {
+      ok,
+      error,
+      event: {
+        id: event.id,
+        title: event.title,
+        slug: event.slug,
+        organizationName: event.organization_name,
+        managerEmail: event.manager_email,
+        dateRange: start && end && start !== end ? `${start} – ${end}` : start || end,
+        publicUrl: `/events/${encodeURIComponent(event.slug ?? event.id)}`
+      },
+      reminderRules: reminderRules.map((r: any) => ({
+        id: r.id,
+        sendOffsetHours: r.send_offset_hours,
+        subjectTemplate: r.subject_template,
+        bodyTemplate: r.body_template,
+        isActive: r.is_active
+      }))
+    });
+  });
+
+  app.post('/admin/events/:id/reminders', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const sendOffsetHours = Number(body.sendOffsetHours ?? 0);
+    const subjectTemplate = String(body.subjectTemplate ?? '').trim();
+    const bodyTemplate = String(body.bodyTemplate ?? '').trim();
+    const isActive = String(body.isActive ?? '').trim() === 'on' || String(body.isActive ?? '').trim() === 'true';
+
+    try {
+      const event = await params.db
+        .selectFrom('events')
+        .select(['id'])
+        .where('id', '=', id)
+        .executeTakeFirst();
+      if (!event) throw new Error('Event not found.');
+
+      if (!Number.isFinite(sendOffsetHours) || sendOffsetHours < 0 || sendOffsetHours > 336) {
+        throw new Error('Offset must be between 0 and 336 hours.');
+      }
+      if (!subjectTemplate || subjectTemplate.length > 300) throw new Error('Subject is required (max 300 characters).');
+      if (!bodyTemplate || bodyTemplate.length > 20000) throw new Error('Body is required (max 20000 characters).');
+
+      const existing = await params.db
+        .selectFrom('reminder_rules')
+        .select((eb) => eb.fn.countAll<number>().as('c'))
+        .where('event_id', '=', id)
+        .executeTakeFirst();
+      if (Number(existing?.c ?? 0) >= 3) throw new Error('You can set up to 3 reminder rules per event.');
+
+      await params.db
+        .insertInto('reminder_rules')
+        .values({
+          event_id: id,
+          send_offset_hours: Math.floor(sendOffsetHours),
+          subject_template: subjectTemplate,
+          body_template: bodyTemplate,
+          is_active: isActive
+        })
+        .execute();
+
+      return reply.code(303).redirect(`/admin/events/${id}/reminders?ok=${encodeURIComponent('Reminder rule added.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/admin/events/${id}/reminders?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/admin/events/:id/reminders/:ruleId/update', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const { id, ruleId } = req.params as { id: string; ruleId: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const sendOffsetHours = Number(body.sendOffsetHours ?? 0);
+    const subjectTemplate = String(body.subjectTemplate ?? '').trim();
+    const bodyTemplate = String(body.bodyTemplate ?? '').trim();
+    const isActive = String(body.isActive ?? '').trim() === 'on' || String(body.isActive ?? '').trim() === 'true';
+
+    try {
+      if (!Number.isFinite(sendOffsetHours) || sendOffsetHours < 0 || sendOffsetHours > 336) {
+        throw new Error('Offset must be between 0 and 336 hours.');
+      }
+      if (!subjectTemplate || subjectTemplate.length > 300) throw new Error('Subject is required (max 300 characters).');
+      if (!bodyTemplate || bodyTemplate.length > 20000) throw new Error('Body is required (max 20000 characters).');
+
+      const row = await params.db
+        .selectFrom('reminder_rules')
+        .select(['id'])
+        .where('id', '=', ruleId)
+        .where('event_id', '=', id)
+        .executeTakeFirst();
+      if (!row) throw new Error('Reminder rule not found.');
+
+      await params.db
+        .updateTable('reminder_rules')
+        .set({
+          send_offset_hours: Math.floor(sendOffsetHours),
+          subject_template: subjectTemplate,
+          body_template: bodyTemplate,
+          is_active: isActive
+        })
+        .where('id', '=', ruleId)
+        .where('event_id', '=', id)
+        .execute();
+
+      return reply.code(303).redirect(`/admin/events/${id}/reminders?ok=${encodeURIComponent('Reminder rule updated.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/admin/events/${id}/reminders?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/admin/events/:id/reminders/:ruleId/delete', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const { id, ruleId } = req.params as { id: string; ruleId: string };
+
+    try {
+      const row = await params.db
+        .selectFrom('reminder_rules')
+        .select(['id'])
+        .where('id', '=', ruleId)
+        .where('event_id', '=', id)
+        .executeTakeFirst();
+      if (!row) throw new Error('Reminder rule not found.');
+
+      await params.db
+        .deleteFrom('reminder_rules')
+        .where('id', '=', ruleId)
+        .where('event_id', '=', id)
+        .execute();
+
+      return reply.code(303).redirect(`/admin/events/${id}/reminders?ok=${encodeURIComponent('Reminder rule deleted.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/admin/events/${id}/reminders?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
   app.post('/admin/events/:id/delete', async (req, reply) => {
     requireRole(req, 'super_admin');
     const { id } = req.params as { id: string };
@@ -2416,6 +2586,13 @@ export async function buildApp(params: {
       .orderBy('role_name', 'asc')
       .execute();
 
+    const reminderRules = await params.db
+      .selectFrom('reminder_rules')
+      .select(['id', 'send_offset_hours', 'subject_template', 'body_template', 'is_active'])
+      .where('event_id', '=', event.id)
+      .orderBy('send_offset_hours', 'asc')
+      .execute();
+
     const description = unescapeHtml(
       (event.description_html ?? '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p>/gi, '\n\n').replace(/<\/?p>/gi, '')
     );
@@ -2448,6 +2625,13 @@ export async function buildApp(params: {
         durationMinutes: t.duration_minutes,
         minVolunteers: t.default_min_volunteers,
         maxVolunteers: t.default_max_volunteers
+      })),
+      reminderRules: reminderRules.map((r: any) => ({
+        id: r.id,
+        sendOffsetHours: r.send_offset_hours,
+        subjectTemplate: r.subject_template,
+        bodyTemplate: r.body_template,
+        isActive: r.is_active
       })),
       shifts: shifts.map((s) => ({
         id: s.id,
@@ -2540,6 +2724,125 @@ export async function buildApp(params: {
 
       await setEventTags({ db: params.db, eventId: id, tagNames: tags, createdByUserId: currentUser.id });
       return reply.code(303).redirect(`/manager/events/${id}/edit`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/manager/events/:id/reminder-rules', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const sendOffsetHours = Number(body.sendOffsetHours ?? 0);
+    const subjectTemplate = String(body.subjectTemplate ?? '').trim();
+    const bodyTemplate = String(body.bodyTemplate ?? '').trim();
+    const isActive = String(body.isActive ?? '').trim() === 'on' || String(body.isActive ?? '').trim() === 'true';
+
+    try {
+      const event = await params.db
+        .selectFrom('events')
+        .select(['id'])
+        .where('id', '=', id)
+        .where('manager_id', '=', currentUser.id)
+        .executeTakeFirst();
+      if (!event) throw new Error('Event not found.');
+
+      if (!Number.isFinite(sendOffsetHours) || sendOffsetHours < 0 || sendOffsetHours > 336) {
+        throw new Error('Offset must be between 0 and 336 hours.');
+      }
+      if (!subjectTemplate || subjectTemplate.length > 300) throw new Error('Subject is required (max 300 characters).');
+      if (!bodyTemplate || bodyTemplate.length > 20000) throw new Error('Body is required (max 20000 characters).');
+
+      const existing = await params.db
+        .selectFrom('reminder_rules')
+        .select((eb) => eb.fn.countAll<number>().as('c'))
+        .where('event_id', '=', id)
+        .executeTakeFirst();
+      if (Number(existing?.c ?? 0) >= 3) throw new Error('You can set up to 3 reminder rules per event.');
+
+      await params.db
+        .insertInto('reminder_rules')
+        .values({
+          event_id: id,
+          send_offset_hours: Math.floor(sendOffsetHours),
+          subject_template: subjectTemplate,
+          body_template: bodyTemplate,
+          is_active: isActive
+        })
+        .execute();
+
+      return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Reminder rule added.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/manager/events/:id/reminder-rules/:ruleId/update', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id, ruleId } = req.params as { id: string; ruleId: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const sendOffsetHours = Number(body.sendOffsetHours ?? 0);
+    const subjectTemplate = String(body.subjectTemplate ?? '').trim();
+    const bodyTemplate = String(body.bodyTemplate ?? '').trim();
+    const isActive = String(body.isActive ?? '').trim() === 'on' || String(body.isActive ?? '').trim() === 'true';
+
+    try {
+      if (!Number.isFinite(sendOffsetHours) || sendOffsetHours < 0 || sendOffsetHours > 336) {
+        throw new Error('Offset must be between 0 and 336 hours.');
+      }
+      if (!subjectTemplate || subjectTemplate.length > 300) throw new Error('Subject is required (max 300 characters).');
+      if (!bodyTemplate || bodyTemplate.length > 20000) throw new Error('Body is required (max 20000 characters).');
+
+      const row = await params.db
+        .selectFrom('reminder_rules')
+        .innerJoin('events', 'events.id', 'reminder_rules.event_id')
+        .select(['reminder_rules.id'])
+        .where('reminder_rules.id', '=', ruleId)
+        .where('reminder_rules.event_id', '=', id)
+        .where('events.manager_id', '=', currentUser.id)
+        .executeTakeFirst();
+      if (!row) throw new Error('Reminder rule not found.');
+
+      await params.db
+        .updateTable('reminder_rules')
+        .set({
+          send_offset_hours: Math.floor(sendOffsetHours),
+          subject_template: subjectTemplate,
+          body_template: bodyTemplate,
+          is_active: isActive
+        })
+        .where('id', '=', ruleId)
+        .where('event_id', '=', id)
+        .execute();
+
+      return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Reminder rule updated.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/manager/events/:id/reminder-rules/:ruleId/delete', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id, ruleId } = req.params as { id: string; ruleId: string };
+
+    try {
+      const row = await params.db
+        .selectFrom('reminder_rules')
+        .innerJoin('events', 'events.id', 'reminder_rules.event_id')
+        .select(['reminder_rules.id'])
+        .where('reminder_rules.id', '=', ruleId)
+        .where('reminder_rules.event_id', '=', id)
+        .where('events.manager_id', '=', currentUser.id)
+        .executeTakeFirst();
+      if (!row) throw new Error('Reminder rule not found.');
+
+      await params.db
+        .deleteFrom('reminder_rules')
+        .where('id', '=', ruleId)
+        .where('event_id', '=', id)
+        .execute();
+
+      return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Reminder rule deleted.')}`);
     } catch (err: any) {
       return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);
     }

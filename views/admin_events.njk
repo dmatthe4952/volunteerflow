@@ -33,6 +33,7 @@
           </div>
           <div class="muted" style="margin-top:6px">Manager: {{ e.managerEmail }}</div>
           <div class="actions" style="margin-top:12px">
+            <a class="btn" href="/admin/events/{{ e.id }}/reminders">Manage Reminders</a>
             <a class="btn danger" href="/admin/events/{{ e.id }}/delete">Delete…</a>
           </div>
         </div>
@@ -55,9 +56,11 @@
             {% if e.cancelledAt %} • Cancelled{% endif %}
           </div>
           <div class="muted" style="margin-top:6px">Manager: {{ e.managerEmail }}</div>
+          <div class="actions" style="margin-top:12px">
+            <a class="btn" href="/admin/events/{{ e.id }}/reminders">Manage Reminders</a>
+          </div>
         </div>
       {% endfor %}
     </div>
   {% endif %}
 {% endblock %}
-
