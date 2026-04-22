@@ -11,6 +11,15 @@ function formEncode(values: Record<string, string>) {
     .join('&');
 }
 
+function ymdOffset(days: number): string {
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days));
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 describe.skipIf(!DATABASE_URL)('manager cancel event', () => {
   let createDb: any;
   let buildApp: any;
@@ -39,8 +48,10 @@ describe.skipIf(!DATABASE_URL)('manager cancel event', () => {
   let managerCsrfToken: string;
   let eventId: string;
   let shiftId: string;
+  let eventDate: string;
 
   beforeEach(async () => {
+    eventDate = ymdOffset(7);
     db = createDb();
     await resetDb(db);
     app = await buildApp({ db, runMigrations: false, logger: false });
@@ -113,10 +124,10 @@ describe.skipIf(!DATABASE_URL)('manager cancel event', () => {
       payload: formEncode({
         title: 'My Test Event',
         organizationId: org.id,
-        date: '2026-04-01',
+        date: eventDate,
         description: 'Hello',
         locationName: 'Somewhere',
-        locationMapUrl: 'https://maps.example.com',
+        locationMapUrl: 'https://www.google.com/maps/@34.852600,-82.394000,15z',
         csrfToken: managerCsrfToken
       })
     });
@@ -128,7 +139,7 @@ describe.skipIf(!DATABASE_URL)('manager cancel event', () => {
       headers: { cookie: mgrCookie, 'content-type': 'application/x-www-form-urlencoded' },
       payload: formEncode({
         roleName: 'Packing',
-        shiftDate: '2026-04-01',
+        shiftDate: eventDate,
         roleDescription: '',
         startTime: '10:00',
         durationMinutes: '60',
