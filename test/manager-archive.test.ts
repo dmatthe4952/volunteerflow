@@ -125,7 +125,7 @@ describe.skipIf(!DATABASE_URL)('manager archive', () => {
         date: eventDate,
         description: 'Hello',
         locationName: 'Somewhere',
-        locationMapUrl: 'https://maps.example.com',
+        locationMapUrl: 'https://www.google.com/maps/@34.852600,-82.394000,15z',
         csrfToken: managerCsrfToken
       })
     });
