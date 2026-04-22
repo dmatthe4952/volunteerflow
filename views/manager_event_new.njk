@@ -34,6 +34,11 @@
         <input name="date" type="date" required />
       </label>
       <label>
+        <span>Purge window (days, optional)</span>
+        <input name="purgeAfterDays" type="number" min="0" max="3650" step="1" placeholder="{{ defaultPurgeAfterDays }}" />
+      </label>
+      <p class="muted" style="margin-top:-6px">Leave blank to use the system default (currently {{ defaultPurgeAfterDays }} days).</p>
+      <label>
         <span>Confirmation email note (optional)</span>
         <textarea name="confirmationEmailNote" rows="4" maxlength="2000" placeholder="This message will be included in the volunteer’s signup confirmation email."></textarea>
       </label>

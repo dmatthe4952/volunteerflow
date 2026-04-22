@@ -1,0 +1,81 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>Purge Volunteer Data</h1>
+  <div class="crumbs">
+    <a href="/admin/dashboard">Admin</a>
+    <span class="sep">/</span>
+    <a href="/admin/events">Events</a>
+    <span class="sep">/</span>
+    <span>Purge</span>
+  </div>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+  {% if ok %}
+    <div class="flash ok"><div>{{ ok }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="title">{{ event.title }}</div>
+    <div class="meta">{{ event.organizationName }} • {{ event.dateRange }}</div>
+    <div class="muted" style="margin-top:8px">Manager: {{ event.managerEmail }}</div>
+    <div class="muted" style="margin-top:8px">
+      {% if event.purgedAt %}
+        Already purged: {{ event.purgedAt }}
+      {% else %}
+        Not yet purged
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:14px">
+    <div class="title">Purge Window</div>
+    <p class="muted" style="margin-top:8px">
+      Current value:
+      {% if event.purgeAfterDays != null %}
+        {{ event.purgeAfterDays }} day(s)
+      {% else %}
+        System default ({{ defaultPurgeAfterDays }} day(s))
+      {% endif %}
+    </p>
+    <form class="form" method="post" action="/admin/events/{{ event.id }}/purge-window" style="margin-top:8px">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+      <label>
+        <span>Set per-event purge window (optional)</span>
+        <input name="purgeAfterDays" type="number" min="0" max="3650" step="1" value="{% if event.purgeAfterDays != null %}{{ event.purgeAfterDays }}{% endif %}" placeholder="{{ defaultPurgeAfterDays }}" />
+      </label>
+      <div class="actions">
+        <button class="btn primary" type="submit">Save Purge Window</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel" style="margin-top:14px">
+    <div class="title">Impact Preview</div>
+    <ul style="margin-top:10px">
+      <li>Shifts retained: {{ impact.shifts }}</li>
+      <li>Signups to delete: {{ impact.signups }}</li>
+      <li>Notification log rows tied to those signups/event: {{ impact.notifications }}</li>
+    </ul>
+    <p class="muted">This action permanently deletes volunteer signup PII for this event and cannot be undone.</p>
+
+    <form class="form" method="post" action="/admin/events/{{ event.id }}/purge" style="margin-top:12px">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+      <label>
+        <span>Type <code>{{ requiredConfirmText }}</code> to confirm</span>
+        <input name="confirmText" required autocomplete="off" />
+      </label>
+      <label>
+        <span>
+          <input type="checkbox" name="acknowledge" value="yes" />
+          I understand this permanently deletes volunteer signup records for this event.
+        </span>
+      </label>
+      <div class="actions">
+        <button class="btn danger" type="submit">Purge Now</button>
+        <a class="btn" href="/admin/events">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

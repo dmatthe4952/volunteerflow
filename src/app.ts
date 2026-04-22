@@ -46,6 +46,7 @@ import {
 } from './notifications.js';
 import { compileNunjucksTemplates } from './templates.js';
 import { setEventTags } from './tags.js';
+import { purgeEventVolunteerPII } from './purge.js';
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -201,6 +202,7 @@ export async function buildApp(params: {
   }
 
   const SYSTEM_SETTING_PAST_EVENTS_ENABLED = 'PAST_EVENTS_ENABLED';
+  const SYSTEM_SETTING_DEFAULT_PURGE_DAYS = 'DEFAULT_PURGE_DAYS';
   const defaultPastEventsEnabled = config.env === 'staging' || config.env === 'development' || config.env === 'test';
 
   function parseBooleanSetting(raw: string | null): boolean | null {
@@ -233,6 +235,13 @@ export async function buildApp(params: {
     if (parsed != null) return parsed;
     await setSystemSetting(SYSTEM_SETTING_PAST_EVENTS_ENABLED, defaultPastEventsEnabled ? 'true' : 'false');
     return defaultPastEventsEnabled;
+  }
+
+  async function getDefaultPurgeAfterDays(): Promise<number> {
+    const raw = await getSystemSetting(SYSTEM_SETTING_DEFAULT_PURGE_DAYS);
+    const parsed = Number(String(raw ?? '').trim());
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 3650) return Math.floor(parsed);
+    return 7;
   }
 
   async function ensureSystemSettingsOnStartup() {
@@ -424,6 +433,15 @@ export async function buildApp(params: {
     const v = value.trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new Error('Invalid date.');
     return v;
+  }
+
+  function parsePurgeAfterDays(value: unknown): number | null {
+    const v = String(value ?? '').trim();
+    if (!v) return null;
+    if (!/^\d+$/.test(v)) throw new Error('Purge window must be a whole number of days.');
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > 3650) throw new Error('Purge window must be between 0 and 3650 days.');
+    return Math.floor(n);
   }
 
   function parseTime(value: string): { hh: number; mm: number } {
@@ -1857,6 +1875,136 @@ export async function buildApp(params: {
     }
   });
 
+  app.get('/admin/events/:id/purge', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const { id } = req.params as { id: string };
+    const qs = req.query as Record<string, string | undefined>;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+
+    const event = await params.db
+      .selectFrom('events')
+      .innerJoin('organizations', 'organizations.id', 'events.organization_id')
+      .innerJoin('users', 'users.id', 'events.manager_id')
+      .select([
+        'events.id',
+        'events.slug',
+        'events.title',
+        'events.start_date',
+        'events.end_date',
+        'events.purge_after_days',
+        'events.is_published',
+        'events.is_archived',
+        'events.purged_at',
+        'events.created_at',
+        'organizations.name as organization_name',
+        'users.email as manager_email'
+      ])
+      .where('events.id', '=', id)
+      .executeTakeFirst();
+    if (!event) return reply.code(404).view('not_found.njk', { message: 'Event not found.' });
+
+    const shifts = await params.db
+      .selectFrom('shifts')
+      .select((eb) => eb.fn.countAll<number>().as('c'))
+      .where('event_id', '=', id)
+      .executeTakeFirst();
+
+    const signups = await params.db
+      .selectFrom('signups')
+      .innerJoin('shifts', 'shifts.id', 'signups.shift_id')
+      .select((eb) => eb.fn.countAll<number>().as('c'))
+      .where('shifts.event_id', '=', id)
+      .executeTakeFirst();
+
+    const notifications = await params.db
+      .selectFrom('notification_sends')
+      .select((eb) => eb.fn.countAll<number>().as('c'))
+      .where('event_id', '=', id)
+      .executeTakeFirst();
+
+    const requiredConfirmText = `PURGE ${event.id}`;
+    const start = toDateOnly(event.start_date);
+    const end = toDateOnly(event.end_date);
+    const defaultPurgeAfterDays = await getDefaultPurgeAfterDays();
+
+    return render(reply, 'admin_event_purge.njk', {
+      ok,
+      error,
+      requiredConfirmText,
+      defaultPurgeAfterDays,
+      impact: {
+        shifts: Number(shifts?.c ?? 0),
+        signups: Number(signups?.c ?? 0),
+        notifications: Number(notifications?.c ?? 0)
+      },
+      event: {
+        id: event.id,
+        title: event.title,
+        slug: event.slug,
+        organizationName: (event as any).organization_name,
+        managerEmail: (event as any).manager_email,
+        dateRange: start && end && start !== end ? `${start} – ${end}` : start || end,
+        isPublished: event.is_published,
+        isArchived: event.is_archived,
+        purgeAfterDays: event.purge_after_days,
+        purgedAt: event.purged_at,
+        createdAt: toIso(event.created_at),
+        publicUrl: `/events/${encodeURIComponent(event.slug ?? event.id)}`
+      }
+    });
+  });
+
+  app.post('/admin/events/:id/purge-window', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const purgeAfterDays = parsePurgeAfterDays(body.purgeAfterDays);
+
+    try {
+      const event = await params.db
+        .selectFrom('events')
+        .select(['id'])
+        .where('id', '=', id)
+        .executeTakeFirst();
+      if (!event) throw new Error('Event not found.');
+
+      await params.db.updateTable('events').set({ purge_after_days: purgeAfterDays }).where('id', '=', id).execute();
+      return reply.code(303).redirect(`/admin/events/${id}/purge?ok=${encodeURIComponent('Purge window updated.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/admin/events/${id}/purge?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/admin/events/:id/purge', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const confirmText = String(body.confirmText ?? '').trim();
+    const acknowledge = String(body.acknowledge ?? '').trim();
+
+    const event = await params.db
+      .selectFrom('events')
+      .select(['id'])
+      .where('id', '=', id)
+      .executeTakeFirst();
+    if (!event) return reply.code(404).view('not_found.njk', { message: 'Event not found.' });
+
+    const requiredConfirmText = `PURGE ${event.id}`;
+    try {
+      if (confirmText !== requiredConfirmText) throw new Error('Confirmation text does not match.');
+      if (acknowledge !== 'yes') throw new Error('Acknowledgement is required.');
+
+      const res = await purgeEventVolunteerPII({ db: params.db, eventId: id });
+      const msg = res.alreadyPurged
+        ? `Manual purge complete. Signups deleted: ${res.deletedSignups}. Notification log rows deleted: ${res.deletedNotificationSends}.`
+        : `Manual purge complete. Purged event and deleted ${res.deletedSignups} signup(s) and ${res.deletedNotificationSends} notification log row(s).`;
+      return reply.code(303).redirect(`/admin/events/${id}/purge?ok=${encodeURIComponent(msg)}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/admin/events/${id}/purge?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
   app.post('/admin/events/:id/delete', async (req, reply) => {
     requireRole(req, 'super_admin');
     const { id } = req.params as { id: string };
@@ -2438,7 +2586,8 @@ export async function buildApp(params: {
       .orderBy('organizations.name', 'asc')
       .execute();
     const error = orgs.length === 0 ? 'No organizations are assigned to your account yet. Ask an admin to assign one.' : null;
-    return render(reply, 'manager_event_new.njk', { orgs, error });
+    const defaultPurgeAfterDays = await getDefaultPurgeAfterDays();
+    return render(reply, 'manager_event_new.njk', { orgs, error, defaultPurgeAfterDays });
   });
 
   app.post('/manager/events/new', async (req, reply) => {
@@ -2453,6 +2602,7 @@ export async function buildApp(params: {
     const description = String(body.description ?? '');
     const locationName = String(body.locationName ?? '').trim();
     const locationMapUrl = String(body.locationMapUrl ?? '').trim();
+    const purgeAfterDays = parsePurgeAfterDays(body.purgeAfterDays);
 
     try {
       if (!title || title.length > 200) throw new Error('Invalid title.');
@@ -2491,6 +2641,7 @@ export async function buildApp(params: {
           recurrence_rule: null,
           start_date: startDate,
           end_date: startDate,
+          purge_after_days: purgeAfterDays,
           is_published: false,
           is_archived: false
         })
@@ -2507,7 +2658,8 @@ export async function buildApp(params: {
         .where('manager_organizations.manager_id', '=', currentUser.id)
         .orderBy('organizations.name', 'asc')
         .execute();
-      return render(reply, 'manager_event_new.njk', { orgs, error: String(err?.message ?? err) });
+      const defaultPurgeAfterDays = await getDefaultPurgeAfterDays();
+      return render(reply, 'manager_event_new.njk', { orgs, error: String(err?.message ?? err), defaultPurgeAfterDays });
     }
   });
 
@@ -2533,6 +2685,7 @@ export async function buildApp(params: {
         'location_name',
         'location_map_url',
         'image_path',
+        'purge_after_days',
         'is_published',
         'is_archived',
         'cancelled_at',
@@ -2596,10 +2749,12 @@ export async function buildApp(params: {
     const description = unescapeHtml(
       (event.description_html ?? '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p>/gi, '\n\n').replace(/<\/?p>/gi, '')
     );
+    const defaultPurgeAfterDays = await getDefaultPurgeAfterDays();
     return render(reply, 'manager_event_edit.njk', {
       error,
       ok,
       orgs,
+      defaultPurgeAfterDays,
       event: {
         id: event.id,
         title: event.title,
@@ -2614,6 +2769,7 @@ export async function buildApp(params: {
         locationMapUrl: event.location_map_url ?? '',
         imagePath: event.image_path ?? '/event-images/default_volunteers.png',
         hasCustomImage: Boolean(event.image_path),
+        purgeAfterDays: event.purge_after_days,
         isPublished: event.is_published,
         isArchived: event.is_archived,
         cancelledAt: event.cancelled_at,
@@ -2662,6 +2818,7 @@ export async function buildApp(params: {
     const description = String(body.description ?? '');
     const locationName = String(body.locationName ?? '').trim();
     const locationMapUrl = String(body.locationMapUrl ?? '').trim();
+    const purgeAfterDays = parsePurgeAfterDays(body.purgeAfterDays);
 
     try {
       if (!title || title.length > 200) throw new Error('Invalid title.');
@@ -2674,11 +2831,14 @@ export async function buildApp(params: {
 
       const existing = await params.db
         .selectFrom('events')
-        .select(['organization_id', 'location_name', 'location_map_url', 'location_lat', 'location_lng'])
+        .select(['organization_id', 'location_name', 'location_map_url', 'location_lat', 'location_lng', 'is_published', 'purge_after_days'])
         .where('id', '=', id)
         .where('manager_id', '=', currentUser.id)
         .executeTakeFirst();
       if (!existing) throw new Error('Event not found.');
+      if (existing.is_published && purgeAfterDays !== (existing.purge_after_days ?? null)) {
+        throw new Error('Purge window cannot be changed after publish. Ask an admin to update it.');
+      }
 
       if (existing.organization_id !== organizationId) {
         const allowedOrg = await params.db
@@ -2716,7 +2876,8 @@ export async function buildApp(params: {
           location_name: nextLocationName,
           location_map_url: nextLocationMapUrl,
           location_lat: nextCoords.lat,
-          location_lng: nextCoords.lng
+          location_lng: nextCoords.lng,
+          purge_after_days: purgeAfterDays
         })
         .where('id', '=', id)
         .where('manager_id', '=', currentUser.id)
@@ -3308,6 +3469,182 @@ export async function buildApp(params: {
         cancellationMessage: event.cancellation_message
       }
     });
+  });
+
+  app.get('/manager/events/:id/broadcast', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    const qs = req.query as Record<string, string | undefined>;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+
+    const event = await params.db
+      .selectFrom('events')
+      .innerJoin('organizations', 'organizations.id', 'events.organization_id')
+      .select(['events.id', 'events.title', 'events.slug', 'organizations.name as organization_name'])
+      .where('events.id', '=', id)
+      .where('events.manager_id', '=', currentUser.id)
+      .executeTakeFirst();
+    if (!event) return reply.code(404).view('not_found.njk', { message: 'Event not found.' });
+
+    const shifts = await params.db
+      .selectFrom('shifts')
+      .select(['id', 'role_name', 'shift_date', 'start_time', 'end_time'])
+      .where('event_id', '=', id)
+      .where('is_active', '=', true)
+      .orderBy('shift_date', 'asc')
+      .orderBy('start_time', 'asc')
+      .execute();
+
+    const counts = await params.db
+      .selectFrom('signups')
+      .innerJoin('shifts', 'shifts.id', 'signups.shift_id')
+      .select(['signups.shift_id'])
+      .select((eb) => eb.fn.countAll<number>().as('c'))
+      .where('shifts.event_id', '=', id)
+      .where('signups.status', '=', 'active')
+      .groupBy('signups.shift_id')
+      .execute();
+    const countByShift = new Map<string, number>();
+    for (const row of counts as any[]) countByShift.set(String(row.shift_id), Number(row.c ?? 0));
+
+    const totalActive = Array.from(countByShift.values()).reduce((a, b) => a + b, 0);
+
+    return render(reply, 'manager_event_broadcast.njk', {
+      ok,
+      error,
+      event: {
+        id: event.id,
+        title: event.title,
+        organizationName: (event as any).organization_name,
+        publicUrl: `/events/${encodeURIComponent((event as any).slug ?? event.id)}`,
+        totalActive
+      },
+      shifts: shifts.map((s: any) => ({
+        id: s.id,
+        roleName: s.role_name,
+        shiftDate: toDateOnly(s.shift_date),
+        startTime: String(s.start_time).slice(0, 5),
+        endTime: String(s.end_time).slice(0, 5),
+        activeCount: countByShift.get(String(s.id)) ?? 0
+      }))
+    });
+  });
+
+  app.post('/manager/events/:id/broadcast', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const subject = String(body.subject ?? '').trim();
+    const message = String(body.message ?? '').trim();
+    const shiftId = String(body.shiftId ?? '').trim();
+
+    try {
+      if (!subject || subject.length > 200 || subject.includes('\n') || subject.includes('\r')) {
+        throw new Error('Subject is required (max 200 chars).');
+      }
+      if (!message || message.length > 20000) throw new Error('Message is required (max 20000 chars).');
+
+      const event = await params.db
+        .selectFrom('events')
+        .select(['id', 'slug', 'title', 'manager_id'])
+        .where('id', '=', id)
+        .where('manager_id', '=', currentUser.id)
+        .executeTakeFirst();
+      if (!event) throw new Error('Event not found.');
+
+      if (shiftId) {
+        const shift = await params.db
+          .selectFrom('shifts')
+          .select(['id'])
+          .where('id', '=', shiftId)
+          .where('event_id', '=', id)
+          .where('is_active', '=', true)
+          .executeTakeFirst();
+        if (!shift) throw new Error('Selected shift not found.');
+      }
+
+      let q = params.db
+        .selectFrom('signups')
+        .innerJoin('shifts', 'shifts.id', 'signups.shift_id')
+        .select([
+          'signups.id as signup_id',
+          'signups.email',
+          'signups.first_name',
+          'signups.cancel_token',
+          'shifts.id as shift_id',
+          'shifts.role_name',
+          'shifts.shift_date',
+          'shifts.start_time',
+          'shifts.end_time'
+        ])
+        .where('shifts.event_id', '=', id)
+        .where('signups.status', '=', 'active');
+
+      if (shiftId) q = q.where('shifts.id', '=', shiftId);
+
+      const recipients = await q.execute();
+      if (recipients.length === 0) throw new Error('No active signups match this selection.');
+
+      const eventUrl = `${config.appUrl}/events/${encodeURIComponent((event as any).slug ?? event.id)}`;
+      const kind = `broadcast_manual_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      let sent = 0;
+
+      for (const r of recipients as any[]) {
+        const cancelUrl = r.cancel_token ? `${config.appUrl}/cancel/${encodeURIComponent(r.cancel_token)}` : '';
+        const shiftWhen = `${toDateOnly(r.shift_date)} ${String(r.start_time).slice(0, 5)}–${String(r.end_time).slice(0, 5)}`;
+        const text = [
+          `Hi ${String(r.first_name ?? '').trim() || 'volunteer'},`,
+          '',
+          message,
+          '',
+          `Event: ${event.title}`,
+          `Shift: ${r.role_name} (${shiftWhen})`,
+          `Event page: ${eventUrl}`,
+          cancelUrl ? `Need to cancel? ${cancelUrl}` : '',
+          '',
+          `— LocalShifts`
+        ]
+          .filter(Boolean)
+          .join('\n');
+
+        const inserted = await params.db
+          .insertInto('notification_sends')
+          .values({
+            kind,
+            event_id: event.id,
+            signup_id: r.signup_id,
+            to_email: r.email,
+            subject,
+            body: text,
+            status: 'queued'
+          })
+          .returning(['id'])
+          .executeTakeFirstOrThrow();
+
+        try {
+          await sendEmail({ to: r.email, subject, text });
+          sent += 1;
+          await params.db
+            .updateTable('notification_sends')
+            .set({ status: 'sent', sent_at: new Date().toISOString(), error: null })
+            .where('id', '=', inserted.id)
+            .execute();
+        } catch (err: any) {
+          await params.db
+            .updateTable('notification_sends')
+            .set({ status: 'failed', error: String(err?.message ?? err) })
+            .where('id', '=', inserted.id)
+            .execute();
+        }
+      }
+
+      return reply
+        .code(303)
+        .redirect(`/manager/events/${id}/broadcast?ok=${encodeURIComponent(`Broadcast queued for ${recipients.length} signup(s). Sent: ${sent}.`)}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/events/${id}/broadcast?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
   });
 
   app.get('/manager/events/:id/signups', async (req, reply) => {

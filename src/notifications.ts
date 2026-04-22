@@ -3,6 +3,8 @@ import { sql } from 'kysely';
 import { config } from './config.js';
 import type { DB } from './db.js';
 import { sendEmail } from './email.js';
+import { buildReminderTemplateContext, renderReminderTemplate } from './reminder_templates.js';
+import { retryAsync } from './retry.js';
 
 function dateOnlyKey(value: unknown): string {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -77,7 +79,17 @@ async function sendAndRecord(params: {
   if (!inserted) return { skipped: true as const };
 
   try {
-    await sendEmail({ to: params.toEmail, subject: params.subject, text: params.body, html: params.html });
+    const isReminder = String(params.kind ?? '').startsWith('shift_reminder_');
+    await retryAsync(
+      async () => {
+        await sendEmail({ to: params.toEmail, subject: params.subject, text: params.body, html: params.html });
+      },
+      {
+        attempts: isReminder ? 3 : 1,
+        baseDelayMs: isReminder ? 250 : 0,
+        backoffFactor: 2
+      }
+    );
     await params.db
       .updateTable('notification_sends')
       .set({ status: 'sent', sent_at: new Date().toISOString(), error: null })
@@ -116,21 +128,34 @@ export async function sendUpcomingShiftReminders(params: {
     .innerJoin('shifts', 'shifts.id', 'signups.shift_id')
     .innerJoin('events', 'events.id', 'shifts.event_id')
     .innerJoin('organizations', 'organizations.id', 'events.organization_id')
+    .innerJoin('users', 'users.id', 'events.manager_id')
+    .leftJoin('reminder_rules', (join) =>
+      join
+        .onRef('reminder_rules.event_id', '=', 'events.id')
+        .on('reminder_rules.send_offset_hours', '=', offsetHours)
+        .on('reminder_rules.is_active', '=', true)
+    )
     .select([
       'signups.id as signup_id',
       'signups.first_name',
+      'signups.last_name',
       'signups.email',
       'signups.cancel_token',
       'events.id as event_id',
       'events.title as event_title',
       'events.slug as event_slug',
+      'events.description_html',
       'organizations.name as organization_name',
       'shifts.role_name',
       'shifts.shift_date',
       'shifts.start_time',
       'shifts.end_time',
       'events.location_name',
-      'events.location_map_url'
+      'events.location_map_url',
+      'users.display_name as manager_name',
+      'users.email as manager_email',
+      'reminder_rules.subject_template as reminder_subject_template',
+      'reminder_rules.body_template as reminder_body_template'
     ])
     .where('signups.status', '=', 'active')
     .where('shifts.is_active', '=', true)
@@ -157,43 +182,51 @@ export async function sendUpcomingShiftReminders(params: {
   let skipped = 0;
   for (const row of rows as any[]) {
     const eventUrl = `${config.appUrl}/events/${encodeURIComponent(row.event_slug ?? row.event_id)}`;
-    const when = `${formatDateOnly(row.shift_date)} ${String(row.start_time).slice(0, 5)}–${String(row.end_time).slice(0, 5)}`;
     const cancelUrl = row.cancel_token ? `${config.appUrl}/cancel/${encodeURIComponent(row.cancel_token)}` : '';
 
-    const subject = `Reminder: ${row.event_title} (${when})`;
-    const body = [
-      `Hi ${row.first_name},`,
-      '',
-      `This is a reminder about your upcoming volunteer shift:`,
-      `${row.event_title} (${row.organization_name})`,
-      `Shift: ${row.role_name}`,
-      `When: ${when}`,
-      row.location_name ? `Where: ${row.location_name}` : '',
-      row.location_map_url ? `Directions: ${row.location_map_url}` : '',
-      `Event page: ${eventUrl}`,
-      cancelUrl ? '' : '',
-      cancelUrl ? `Need to cancel? ${cancelUrl}` : '',
-      '',
-      `— LocalShifts`
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const subjectTemplate = String(row.reminder_subject_template ?? '').trim()
+      || 'Reminder: {{event_title}} ({{shift_date}} {{shift_start_time}}–{{shift_end_time}})';
+    const bodyTemplate = String(row.reminder_body_template ?? '').trim()
+      || [
+        'Hi {{volunteer_first_name}},',
+        '',
+        'This is a reminder about your upcoming volunteer shift:',
+        '{{event_title}} ({{organization_name}})',
+        'Shift: {{shift_role}}',
+        'When: {{shift_date}} {{shift_start_time}}–{{shift_end_time}}',
+        '{{location_name}}',
+        '{{location_map_url}}',
+        'Event page: {{event_url}}',
+        'Need to cancel? {{cancel_url}}',
+        '',
+        '— LocalShifts'
+      ].join('\n');
 
-    const html = [
-      `<p>Hi ${escapeHtml(row.first_name)},</p>`,
-      `<p>This is a reminder about your upcoming volunteer shift:</p>`,
-      `<p><strong>${escapeHtml(row.event_title)}</strong> (${escapeHtml(row.organization_name)})<br/>` +
-        `Shift: ${escapeHtml(row.role_name)}<br/>` +
-        `When: ${escapeHtml(when)}<br/>` +
-        (row.location_name ? `Where: ${escapeHtml(row.location_name)}<br/>` : '') +
-        (row.location_map_url ? `<a href="${escapeAttr(row.location_map_url)}">Click for directions</a><br/>` : '') +
-        `<a href="${escapeAttr(eventUrl)}">View event details</a><br/>` +
-        `</p>`,
-      cancelUrl ? `<p><a href="${escapeAttr(cancelUrl)}">Need to cancel? Click here.</a></p>` : '',
-      `<p>— LocalShifts</p>`
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const ctx = buildReminderTemplateContext({
+      volunteerFirstName: row.first_name,
+      volunteerLastInitial: row.last_name,
+      eventTitle: row.event_title,
+      eventDescriptionHtml: row.description_html,
+      organizationName: row.organization_name,
+      shiftRole: row.role_name,
+      shiftDate: row.shift_date,
+      shiftStartTime: row.start_time,
+      shiftEndTime: row.end_time,
+      locationName: row.location_name,
+      locationMapUrl: row.location_map_url,
+      cancelUrl,
+      eventUrl,
+      managerName: row.manager_name,
+      managerEmail: row.manager_email
+    });
+
+    const subject = renderReminderTemplate(subjectTemplate, ctx)
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 300);
+
+    const body = renderReminderTemplate(bodyTemplate, ctx).trim();
+    const html = `<p>${plainTextToHtml(body)}</p>`;
 
     if (params.dryRun) {
       queued += 1;

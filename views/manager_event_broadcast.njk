@@ -1,0 +1,61 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>Broadcast Message</h1>
+  <div class="crumbs">
+    <a href="/manager/events">My events</a>
+    <span class="sep">/</span>
+    <a href="/manager/events/{{ event.id }}/edit">{{ event.title }}</a>
+    <span class="sep">/</span>
+    <span>Broadcast</span>
+  </div>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+  {% if ok %}
+    <div class="flash ok"><div>{{ ok }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="row">
+      <span class="label">Event</span>
+      <span class="value">{{ event.title }}</span>
+    </div>
+    <div class="row">
+      <span class="label">Active signups</span>
+      <span class="value">{{ event.totalActive }}</span>
+    </div>
+    <div class="row">
+      <span class="label">Public page</span>
+      <span class="value"><a href="{{ event.publicUrl }}">{{ event.publicUrl }}</a></span>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:14px">
+    <form class="form" method="post" action="/manager/events/{{ event.id }}/broadcast">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+      <label>
+        <span>Target</span>
+        <select name="shiftId">
+          <option value="">All active signups in event</option>
+          {% for s in shifts %}
+            <option value="{{ s.id }}">{{ s.roleName }} — {{ s.shiftDate }} {{ s.startTime }}–{{ s.endTime }} ({{ s.activeCount }} active)</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Subject</span>
+        <input name="subject" required maxlength="200" placeholder="e.g. Weather update for Saturday volunteers" />
+      </label>
+      <label>
+        <span>Message</span>
+        <textarea name="message" rows="8" required maxlength="20000" placeholder="Type your message for volunteers..."></textarea>
+      </label>
+      <p class="muted">A personalized cancel link is appended automatically for each recipient.</p>
+      <div class="actions">
+        <button class="btn primary" type="submit">Send Broadcast</button>
+        <a class="btn" href="/manager/events/{{ event.id }}/signups">Back to Signups</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

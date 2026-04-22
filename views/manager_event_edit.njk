@@ -83,6 +83,20 @@
         </label>
       </div>
       <label>
+        <span>Purge window (days, optional)</span>
+        {% if event.isPublished %}
+          <input type="number" value="{% if event.purgeAfterDays != null %}{{ event.purgeAfterDays }}{% endif %}" disabled />
+          <input type="hidden" name="purgeAfterDays" value="{% if event.purgeAfterDays != null %}{{ event.purgeAfterDays }}{% endif %}" />
+        {% else %}
+          <input name="purgeAfterDays" type="number" min="0" max="3650" step="1" value="{% if event.purgeAfterDays != null %}{{ event.purgeAfterDays }}{% endif %}" placeholder="{{ defaultPurgeAfterDays }}" />
+        {% endif %}
+      </label>
+      {% if event.isPublished %}
+        <p class="muted" style="margin-top:-6px">This event is published. Ask an admin to change the purge window.</p>
+      {% else %}
+        <p class="muted" style="margin-top:-6px">Leave blank to use the system default (currently {{ defaultPurgeAfterDays }} days).</p>
+      {% endif %}
+      <label>
         <span>Description</span>
         <textarea name="description" rows="6">{{ event.description }}</textarea>
       </label>
@@ -103,6 +117,7 @@
       <div class="actions">
         <button class="btn primary" type="submit">Save</button>
         <a class="btn" href="/manager/events/{{ event.id }}/signups">View Signups</a>
+        <a class="btn" href="/manager/events/{{ event.id }}/broadcast">Broadcast</a>
         {% if not event.isArchived %}
           {% if event.isPublished %}
             <button class="btn" formmethod="post" formaction="/manager/events/{{ event.id }}/unpublish" type="submit">Unpublish</button>
