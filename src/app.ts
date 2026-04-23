@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import { pipeline } from 'node:stream/promises';
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
 import Fastify from 'fastify';
@@ -38,7 +37,8 @@ import {
   deleteSession,
   hasAnySuperAdmin,
   loadCurrentUserFromSession,
-  recordLoginAudit
+  recordLoginAudit,
+  SESSION_ABSOLUTE_TIMEOUT_MS
 } from './auth.js';
 import {
   sendCancellationEmails,
@@ -70,6 +70,26 @@ function imageExtFromMime(mime: string): string | null {
   if (m === 'image/jpeg') return 'jpg';
   if (m === 'image/webp') return 'webp';
   if (m === 'image/gif') return 'gif';
+  return null;
+}
+
+function imageExtFromMagicBytes(buf: Buffer): string | null {
+  if (buf.length >= 8) {
+    const pngSig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    if (pngSig.every((b, i) => buf[i] === b)) return 'png';
+  }
+  if (buf.length >= 3) {
+    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  }
+  if (buf.length >= 6) {
+    const head = buf.subarray(0, 6).toString('ascii');
+    if (head === 'GIF87a' || head === 'GIF89a') return 'gif';
+  }
+  if (buf.length >= 12) {
+    const riff = buf.subarray(0, 4).toString('ascii');
+    const webp = buf.subarray(8, 12).toString('ascii');
+    if (riff === 'RIFF' && webp === 'WEBP') return 'webp';
+  }
   return null;
 }
 
@@ -321,7 +341,7 @@ export async function buildApp(params: {
     const pathOnly = String(req.url ?? '').split('?')[0] ?? '';
     if (!pathOnly.startsWith('/admin') && !pathOnly.startsWith('/manager')) return;
 
-    if (pathOnly === '/admin/setup' || pathOnly === '/admin/login' || pathOnly === '/manager/login') return;
+    if (pathOnly === '/admin/setup') return;
 
     const currentUser = (req as any).currentUser;
     if (!currentUser || (currentUser.role !== 'super_admin' && currentUser.role !== 'event_manager')) return;
@@ -373,10 +393,10 @@ export async function buildApp(params: {
         reply.setCookie('vf_csrf', csrfToken, {
           path: '/',
           httpOnly: true,
-          sameSite: 'lax',
+          sameSite: 'strict',
           secure: config.env !== 'development',
           signed: true,
-          maxAge: 60 * 60 * 24 * 30
+          maxAge: Math.floor(SESSION_ABSOLUTE_TIMEOUT_MS / 1000)
         });
       }
     }
@@ -1258,11 +1278,11 @@ export async function buildApp(params: {
           '',
           verifyUrlOneTime,
           '',
-          'This link can be used once and expires in 30 minutes.'
+          'This link can be used once and expires in 1 hour.'
         ].join('\n'),
         html: [
           '<p><a href="' + verifyUrlOneTime + '">Click to view signups</a></p>',
-          '<p style="color:#666;font-size:14px;margin:0">This link can be used once and expires in 30 minutes.</p>'
+          '<p style="color:#666;font-size:14px;margin:0">This link can be used once and expires in 1 hour.</p>'
         ].join('\n')
       }, { db: params.db });
 
@@ -1383,7 +1403,7 @@ export async function buildApp(params: {
       return render(reply, 'login.njk', { error: 'Invalid email or password.', roleHint });
     }
 
-    const sess = await createSession(params.db, { userId: user.id, ttlDays: 30 });
+    const sess = await createSession(params.db, { userId: user.id });
     await recordLoginAudit(params.db, {
       email: user.email,
       attemptedRole: role,
@@ -1395,18 +1415,18 @@ export async function buildApp(params: {
     reply.setCookie('vf_sess', sess.id, {
       path: '/',
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'strict',
       secure: config.env !== 'development',
       signed: true,
-      maxAge: 60 * 60 * 24 * 30
+      maxAge: Math.floor(SESSION_ABSOLUTE_TIMEOUT_MS / 1000)
     });
     reply.setCookie('vf_csrf', createCsrfToken(), {
       path: '/',
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'strict',
       secure: config.env !== 'development',
       signed: true,
-      maxAge: 60 * 60 * 24 * 30
+      maxAge: Math.floor(SESSION_ABSOLUTE_TIMEOUT_MS / 1000)
     });
     return reply.code(303).redirect(dashboardByRole(role));
   }
@@ -1421,25 +1441,20 @@ export async function buildApp(params: {
     return render(reply, 'login.njk', { roleHint });
   });
 
-  app.post('/login', async (req, reply) => {
-    return handleLogin(req, reply);
-  });
-
-  app.get('/admin/login', async (_req, reply) => {
-    return reply.code(303).redirect('/login?role=admin');
-  });
-
-  app.post('/admin/login', async (req, reply) => {
-    return handleLogin(req, reply, 'super_admin');
-  });
-
-  app.get('/manager/login', async (_req, reply) => {
-    return reply.code(303).redirect('/login?role=manager');
-  });
-
-  app.post('/manager/login', async (req, reply) => {
-    return handleLogin(req, reply, 'event_manager');
-  });
+  app.post(
+    '/login',
+    {
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '15 minutes'
+        }
+      }
+    },
+    async (req, reply) => {
+      return handleLogin(req, reply);
+    }
+  );
 
   app.post('/logout', async (req, reply) => {
     const raw = req?.cookies?.vf_sess;
@@ -3426,12 +3441,16 @@ export async function buildApp(params: {
 
       const filePart = await (req as any).file();
       if (!filePart?.file) throw new Error('Image file is required.');
-      const ext = imageExtFromMime(String(filePart.mimetype ?? ''));
-      if (!ext) throw new Error('Unsupported image type. Please upload a PNG, JPG, WebP, or GIF.');
+      const mimeExt = imageExtFromMime(String(filePart.mimetype ?? ''));
+      const fileBuffer = await filePart.toBuffer();
+      const magicExt = imageExtFromMagicBytes(fileBuffer);
+      if (!mimeExt || !magicExt) throw new Error('Unsupported image type. Please upload a PNG, JPG, WebP, or GIF.');
+      if (mimeExt !== magicExt) throw new Error('Image file contents do not match the declared image type.');
+      const ext = magicExt;
 
       const name = `event-${id}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
       const target = path.join(eventImagesDir, name);
-      await pipeline(filePart.file, fs.createWriteStream(target, { flags: 'wx' }));
+      fs.writeFileSync(target, fileBuffer, { flag: 'wx' });
 
       await params.db
         .updateTable('events')

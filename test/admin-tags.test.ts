@@ -138,4 +138,68 @@ describe.skipIf(!DATABASE_URL)('admin tags', () => {
       .executeTakeFirst();
     expect(Number(remaining?.c ?? 0)).toBe(0);
   });
+
+  test('admin screen inventory routes are reachable for admin and forbidden for manager', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/admin/setup',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({ email: 'admin@example.com', displayName: 'Admin', password: 'correct-horse-battery-staple' })
+    });
+
+    const adminLogin = await app.inject({
+      method: 'POST',
+      url: '/login',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({ email: 'admin@example.com', password: 'correct-horse-battery-staple', role: 'admin' })
+    });
+    const adminCookie = cookieHeaderFromSetCookie(adminLogin.headers['set-cookie'] as any);
+    const adminCsrf = await fetchCsrfToken(app, '/admin/users', adminCookie);
+
+    const createManager = await app.inject({
+      method: 'POST',
+      url: '/admin/users',
+      headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({
+        email: 'manager@example.com',
+        displayName: 'Manager',
+        password: 'correct-horse-battery-staple',
+        csrfToken: adminCsrf
+      })
+    });
+    expect(createManager.statusCode).toBe(303);
+
+    const managerLogin = await app.inject({
+      method: 'POST',
+      url: '/login',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({ email: 'manager@example.com', password: 'correct-horse-battery-staple', role: 'manager' })
+    });
+    const managerCookie = cookieHeaderFromSetCookie(managerLogin.headers['set-cookie'] as any);
+
+    const inventory: Array<{ path: string; marker: string }> = [
+      { path: '/admin/dashboard', marker: 'Admin Dashboard' },
+      { path: '/admin/users', marker: 'Users' },
+      { path: '/admin/organizations', marker: 'Organizations' },
+      { path: '/admin/tags', marker: 'Tag Management' },
+      { path: '/admin/settings', marker: 'System Settings' }
+    ];
+
+    for (const route of inventory) {
+      const adminRes = await app.inject({
+        method: 'GET',
+        url: route.path,
+        headers: { cookie: adminCookie }
+      });
+      expect(adminRes.statusCode).toBe(200);
+      expect(adminRes.body).toContain(route.marker);
+
+      const managerRes = await app.inject({
+        method: 'GET',
+        url: route.path,
+        headers: { cookie: managerCookie }
+      });
+      expect(managerRes.statusCode).toBe(403);
+    }
+  });
 });

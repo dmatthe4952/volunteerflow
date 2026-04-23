@@ -790,7 +790,7 @@ export async function requestMySignupsToken(db: Kysely<DB>, email: string) {
 
   const rawToken = crypto.randomBytes(32).toString('hex');
   const tokenHmac = crypto.createHmac('sha256', config.sessionSecret).update(rawToken).digest();
-  const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
   await db
     .insertInto('volunteer_email_tokens')
