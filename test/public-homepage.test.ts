@@ -101,13 +101,14 @@ describe.skipIf(!DATABASE_URL)('public homepage listing', () => {
     withShift?: boolean;
     locationLat?: string | null;
     locationLng?: string | null;
+    organizationId?: string;
   }) {
     const slug = params.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     const date = ymdOffset(params.dayOffset);
     const event = await db
       .insertInto('events')
       .values({
-        organization_id: orgId,
+        organization_id: params.organizationId ?? orgId,
         manager_id: managerId,
         slug,
         title: params.title,
@@ -146,6 +147,28 @@ describe.skipIf(!DATABASE_URL)('public homepage listing', () => {
         })
         .execute();
     }
+  }
+
+  async function createOrganization(name: string, slug: string): Promise<string> {
+    const org = await db
+      .insertInto('organizations')
+      .values({
+        name,
+        slug,
+        primary_color: '#4DD4AC',
+        contact_email: 'contact@example.com',
+        created_by: adminId
+      })
+      .returning(['id'])
+      .executeTakeFirstOrThrow();
+
+    await db
+      .insertInto('manager_organizations')
+      .values({ manager_id: managerId, organization_id: org.id, assigned_by: adminId })
+      .onConflict((oc) => oc.columns(['manager_id', 'organization_id']).doNothing())
+      .execute();
+
+    return org.id;
   }
 
   test('shows only upcoming events and caps featured section to 3 most recently updated', async () => {
@@ -235,5 +258,84 @@ describe.skipIf(!DATABASE_URL)('public homepage listing', () => {
     // Unknown-location events should sort below in-radius events.
     expect(body.indexOf(nearby)).toBeGreaterThan(0);
     expect(body.indexOf(unknown)).toBeGreaterThan(body.indexOf(nearby));
+  });
+
+  test('ip location fallback from proxy headers applies when no query or cookie is provided', async () => {
+    const suffix = crypto.randomBytes(3).toString('hex');
+    const nearby = `IP Nearby Event ${suffix}`;
+    const farAway = `IP Far Event ${suffix}`;
+
+    await createEvent({
+      title: nearby,
+      isFeatured: false,
+      dayOffset: 8,
+      updatedAt: '2026-04-10T10:00:00.000Z',
+      locationLat: '40.7500',
+      locationLng: '-73.9970'
+    });
+    await createEvent({
+      title: farAway,
+      isFeatured: false,
+      dayOffset: 8,
+      updatedAt: '2026-04-10T10:00:00.000Z',
+      locationLat: '37.7749',
+      locationLng: '-122.4194'
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/',
+      headers: {
+        'cf-ipcity': 'New York',
+        'cf-region-code': 'NY',
+        'cf-iplatitude': '40.7505',
+        'cf-iplongitude': '-73.9965'
+      }
+    });
+    expect(res.statusCode).toBe(200);
+
+    const body = String(res.body);
+    expect(body).toContain('Showing events near New York, NY');
+    expect(body).toContain(nearby);
+    expect(body).not.toContain(farAway);
+  });
+
+  test('organization filter appears only when multiple orgs have published events and filters results', async () => {
+    const suffix = crypto.randomBytes(3).toString('hex');
+    const orgOneEvent = `Org One Event ${suffix}`;
+    const orgTwoEvent = `Org Two Event ${suffix}`;
+
+    await createEvent({
+      title: orgOneEvent,
+      isFeatured: false,
+      dayOffset: 8,
+      updatedAt: '2026-04-10T10:00:00.000Z'
+    });
+
+    const singleOrgRes = await app.inject({ method: 'GET', url: '/' });
+    expect(singleOrgRes.statusCode).toBe(200);
+    expect(String(singleOrgRes.body)).not.toContain('<span>Organization</span>');
+
+    const secondOrgId = await createOrganization(`Second Org ${suffix}`, `second-org-${suffix}`);
+    await createEvent({
+      title: orgTwoEvent,
+      isFeatured: false,
+      dayOffset: 8,
+      updatedAt: '2026-04-10T10:00:00.000Z',
+      organizationId: secondOrgId
+    });
+
+    const multiOrgRes = await app.inject({ method: 'GET', url: '/' });
+    expect(multiOrgRes.statusCode).toBe(200);
+    const body = String(multiOrgRes.body);
+    expect(body).toContain('<span>Organization</span>');
+    expect(body).toContain('All organizations');
+    expect(body).toContain(`Second Org ${suffix}`);
+
+    const filteredRes = await app.inject({ method: 'GET', url: `/?org=second-org-${suffix}` });
+    expect(filteredRes.statusCode).toBe(200);
+    const filteredBody = String(filteredRes.body);
+    expect(filteredBody).toContain(orgTwoEvent);
+    expect(filteredBody).not.toContain(orgOneEvent);
   });
 });

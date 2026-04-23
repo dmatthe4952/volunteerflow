@@ -20,6 +20,7 @@ services:
       APP_PORT: 3000
       APP_URL: http://localhost:3000
       APP_TIMEZONE: America/New_York
+      GEOIP_DB_PATH: ${GEOIP_DB_PATH:-}
       DATABASE_URL: $DATABASE_URL
       SESSION_SECRET: dev-only-change-me
       ADMIN_TOKEN: dev-ops-change-me

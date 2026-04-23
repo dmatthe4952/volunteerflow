@@ -41,6 +41,7 @@ export const config = {
   appUrl: envOrDevDefault('APP_URL', `http://localhost:${port}`),
   trustProxy: envBool('TRUST_PROXY') ?? (env === 'staging' || env === 'production'),
   timezone: resolveTimezone(),
+  geoipDbPath: process.env.GEOIP_DB_PATH ?? '',
   databaseUrl: requireEnv('DATABASE_URL'),
   sessionSecret: requireEnv('SESSION_SECRET'),
   settingsEncryptionKey: process.env.SETTINGS_ENCRYPTION_KEY || requireEnv('SESSION_SECRET'),

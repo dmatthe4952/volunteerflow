@@ -127,6 +127,7 @@ function endOfDayPlusDaysUtc(date: Date, days: number): Date {
 export async function listPublicEvents(db: Kysely<DB>) {
   return listPublicEventsFiltered(db, {
     tag: null,
+    organizationSlug: null,
     originLat: null,
     originLng: null,
     radiusMiles: null
@@ -148,9 +149,35 @@ export async function listPublicEventTags(db: Kysely<DB>) {
     .filter(Boolean);
 }
 
+export async function listPublicEventOrganizations(db: Kysely<DB>) {
+  const nowLocal = sql`timezone(${config.timezone}, now())`;
+  const res = await sql<{ name: string; slug: string }>`
+    select distinct o.name as name, o.slug as slug
+    from organizations o
+    join events e on e.organization_id = o.id
+    where e.is_published = true
+      and e.is_archived = false
+      and exists (
+        select 1
+        from shifts s
+        where s.event_id = e.id
+          and s.is_active = true
+          and (
+            s.shift_date > (${nowLocal})::date
+            or (s.shift_date = (${nowLocal})::date and s.start_time > (${nowLocal})::time)
+          )
+      )
+    order by o.name asc
+  `.execute(db);
+
+  return res.rows
+    .map((r) => ({ name: String(r.name ?? '').trim(), slug: String(r.slug ?? '').trim() }))
+    .filter((r) => r.name && r.slug);
+}
+
 export async function listPublicEventsFiltered(
   db: Kysely<DB>,
-  params: { tag: string | null; originLat: number | null; originLng: number | null; radiusMiles: number | null }
+  params: { tag: string | null; organizationSlug: string | null; originLat: number | null; originLng: number | null; radiusMiles: number | null }
 ) {
   const nowLocal = sql`timezone(${config.timezone}, now())`;
   const hasOrigin =
@@ -221,6 +248,10 @@ export async function listPublicEventsFiltered(
           and t.name = ${params.tag}
       )`
     );
+  }
+
+  if (params.organizationSlug) {
+    q = q.where('organizations.slug', '=', params.organizationSlug);
   }
 
   q = q

@@ -13,12 +13,15 @@
         {% else %}
           (within {{ locationContext.radiusMiles }} miles)
         {% endif %}
-        — <a href="/?loc=clear{% if tag %}&tag={{ tag | urlencode }}{% endif %}">change location</a>
+        — <a href="/?loc=clear{% if tag %}&tag={{ tag | urlencode }}{% endif %}{% if selectedOrg %}&org={{ selectedOrg | urlencode }}{% endif %}">change location</a>
       </p>
     {% endif %}
     <form class="form" method="get" action="/">
       {% if tag %}
         <input type="hidden" name="tag" value="{{ tag }}" />
+      {% endif %}
+      {% if selectedOrg and (not orgOptions or orgOptions.length <= 1) %}
+        <input type="hidden" name="org" value="{{ selectedOrg }}" />
       {% endif %}
       <div class="grid2">
         <label>
@@ -37,6 +40,17 @@
           </select>
         </label>
       </div>
+      {% if orgOptions and orgOptions.length > 1 %}
+        <label>
+          <span>Organization</span>
+          <select name="org">
+            <option value="" {% if not selectedOrg %}selected{% endif %}>All organizations</option>
+            {% for org in orgOptions %}
+              <option value="{{ org.slug }}" {% if selectedOrg == org.slug %}selected{% endif %}>{{ org.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      {% endif %}
       <div class="actions">
         <button class="btn primary" type="submit">Apply Location</button>
         <button class="btn" id="use-my-location" type="button">Use My Current Location</button>

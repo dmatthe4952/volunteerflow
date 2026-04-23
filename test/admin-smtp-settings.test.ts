@@ -215,4 +215,87 @@ describe.skipIf(!DATABASE_URL)('admin smtp settings ui', () => {
     expect(resolved.fromName).toBe('DB Sender');
     expect(resolved.fromEmail).toBe('db@example.com');
   });
+
+  test('smtp test-email action reports validation and success states', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/admin/setup',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({ email: 'admin@example.com', displayName: 'Admin', password: 'correct-horse-battery-staple' })
+    });
+    const adminLogin = await app.inject({
+      method: 'POST',
+      url: '/login',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({ email: 'admin@example.com', password: 'correct-horse-battery-staple', role: 'admin' })
+    });
+    const adminCookie = cookieHeaderFromSetCookie(adminLogin.headers['set-cookie'] as any);
+    const csrf = await fetchCsrfToken(app, '/admin/settings', adminCookie);
+
+    const invalidRecipient = await app.inject({
+      method: 'POST',
+      url: '/admin/settings/smtp/test',
+      headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({ to: 'not-an-email', csrfToken: csrf })
+    });
+    expect(invalidRecipient.statusCode).toBe(303);
+    expect(String(invalidRecipient.headers.location)).toContain('testErr=');
+    expect(decodeURIComponent(String(invalidRecipient.headers.location))).toContain('Valid recipient email is required');
+
+    // Ensure DB-over-env precedence lets us intentionally clear SMTP so test-mode sendEmail
+    // uses the non-SMTP path and succeeds deterministically.
+    const clearSmtp = await app.inject({
+      method: 'POST',
+      url: '/admin/settings/smtp',
+      headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({
+        host: '',
+        port: '587',
+        user: '',
+        pass: '',
+        fromName: '',
+        fromEmail: '',
+        csrfToken: csrf
+      })
+    });
+    expect(clearSmtp.statusCode).toBe(303);
+
+    const missingConfig = await app.inject({
+      method: 'POST',
+      url: '/admin/settings/smtp/test',
+      headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({ to: 'admin@example.com', csrfToken: csrf })
+    });
+    expect(missingConfig.statusCode).toBe(303);
+    expect(String(missingConfig.headers.location)).toContain('testErr=');
+    expect(decodeURIComponent(String(missingConfig.headers.location))).toContain('SMTP is not configured');
+
+    const saveSmtp = await app.inject({
+      method: 'POST',
+      url: '/admin/settings/smtp',
+      headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({
+        host: 'smtp.example.com',
+        port: '465',
+        secure: 'on',
+        user: 'mailer-user',
+        pass: 'secret-one',
+        fromName: 'LocalShifts Mailer',
+        fromEmail: 'no-reply@example.com',
+        csrfToken: csrf
+      })
+    });
+    expect(saveSmtp.statusCode).toBe(303);
+
+    // In test env this succeeds without external SMTP delivery.
+    const ok = await app.inject({
+      method: 'POST',
+      url: '/admin/settings/smtp/test',
+      headers: { cookie: adminCookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: formEncode({ to: 'admin@example.com', csrfToken: csrf })
+    });
+    expect(ok.statusCode).toBe(303);
+    expect(String(ok.headers.location)).toContain('testOk=');
+    expect(decodeURIComponent(String(ok.headers.location))).toContain('Test email sent to admin@example.com');
+  });
 });

@@ -61,4 +61,27 @@
       </div>
     </form>
   </div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="title">SMTP Test Email</div>
+    <p class="muted" style="margin-top:8px">Send a one-time test message using the currently saved SMTP settings.</p>
+
+    {% if testError %}
+      <div class="flash err" style="margin-top:10px"><div>{{ testError }}</div></div>
+    {% endif %}
+    {% if testOk %}
+      <div class="flash ok" style="margin-top:10px"><div>{{ testOk }}</div></div>
+    {% endif %}
+
+    <form class="form" method="post" action="/admin/settings/smtp/test" style="margin-top:10px">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+      <label>
+        <span>Send test to</span>
+        <input name="to" type="email" maxlength="120" required value="{{ testRecipientDefault }}" placeholder="you@example.com" />
+      </label>
+      <div class="actions">
+        <button class="btn" type="submit">Send Test Email</button>
+      </div>
+    </form>
+  </div>
 {% endblock %}

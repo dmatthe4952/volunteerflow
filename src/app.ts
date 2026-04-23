@@ -21,6 +21,7 @@ import {
   findActiveSignupByCancelToken,
   getPublicEventBySlugOrIdForViewer,
   listPublicEventTags,
+  listPublicEventOrganizations,
   listPublicEventsFiltered,
   listPastPublicEvents,
   listViewerActiveSignups,
@@ -28,7 +29,7 @@ import {
   verifyMySignupsToken
 } from './public.js';
 import { cancelEventAndNotify, requireAdminToken } from './ops.js';
-import { canSendEmail, sendEmail } from './email.js';
+import { canSendEmail, sendEmail, resolveSmtpConfig } from './email.js';
 import { decryptSettingValue, encryptSettingValue } from './settings_crypto.js';
 import {
   authenticateUser,
@@ -48,6 +49,7 @@ import {
 import { compileNunjucksTemplates } from './templates.js';
 import { setEventTags, syncUnderstaffedTagForEvent } from './tags.js';
 import { purgeEventVolunteerPII } from './purge.js';
+import { createGeoIpLookup } from './geoip.js';
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -106,6 +108,10 @@ export async function buildApp(params: {
   }
 
   const app = Fastify({ logger, trustProxy: config.trustProxy });
+  const geoIpLookup = createGeoIpLookup({
+    dbPath: config.geoipDbPath,
+    log: (line, err) => app.log.warn({ err }, line)
+  });
   const projectRoot = params.projectRoot ?? process.cwd();
   const eventImagesDir = path.join(projectRoot, 'uploads', 'event-images');
   const addEventRequestsDir = path.join(projectRoot, 'uploads', 'add-event-requests');
@@ -665,6 +671,12 @@ export async function buildApp(params: {
     return { lat, lng, label };
   }
 
+  async function getIpApproxLocation(req: any): Promise<{ lat: number; lng: number; label: string } | null> {
+    const geoIp = await geoIpLookup.lookup(req);
+    if (geoIp && !isInvalidCoordPair(geoIp.lat, geoIp.lng)) return geoIp;
+    return getIpApproxLocationFromHeaders(req);
+  }
+
   async function geocodeUsZip(zip: string): Promise<{ lat: number; lng: number; label: string } | null> {
     const normalizeZip = (value: unknown): string | null => {
       const m = String(value ?? '').match(/\b(\d{5})\b/);
@@ -820,6 +832,10 @@ export async function buildApp(params: {
     const navTags = navTagsRaw.map((t) => ({ value: t, q: encodeURIComponent(t) }));
     const allowed = new Set(navTagsRaw.map((t) => t.toLowerCase()));
     const tag = showAll ? null : rawTag && allowed.has(rawTag) ? rawTag : null;
+    const orgOptions = await listPublicEventOrganizations(params.db);
+    const orgAllowed = new Set(orgOptions.map((o) => o.slug.toLowerCase()));
+    const rawOrg = typeof qs.org === 'string' ? qs.org.trim().toLowerCase() : '';
+    const organizationSlug = rawOrg && orgAllowed.has(rawOrg) ? rawOrg : null;
     const clearLocation = String(qs.loc ?? '').trim().toLowerCase() === 'clear';
     const radiusRaw = String(qs.radius ?? '').trim();
     const radiusParsed = parseRadiusMiles(qs.radius);
@@ -899,7 +915,7 @@ export async function buildApp(params: {
         };
         locationCookie = cookieLoc;
       } else {
-        const ipLoc = getIpApproxLocationFromHeaders(req);
+        const ipLoc = await getIpApproxLocation(req);
         if (ipLoc) {
           originLat = ipLoc.lat;
           originLng = ipLoc.lng;
@@ -933,6 +949,7 @@ export async function buildApp(params: {
 
     const events = await listPublicEventsFiltered(params.db, {
       tag,
+      organizationSlug,
       originLat,
       originLng,
       radiusMiles: locationContext.hasActiveFilter ? locationContext.radiusMiles : null
@@ -952,6 +969,8 @@ export async function buildApp(params: {
       navAddEventOnly: true,
       navTags,
       tag,
+      orgOptions,
+      selectedOrg: organizationSlug,
       pastEventsEnabled,
       locationContext
     });
@@ -1535,10 +1554,16 @@ export async function buildApp(params: {
     const qs = req.query as Record<string, string | undefined>;
     const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
     const error = typeof qs.err === 'string' ? qs.err : undefined;
+    const testOk = typeof qs.testOk === 'string' ? qs.testOk : undefined;
+    const testError = typeof qs.testErr === 'string' ? qs.testErr : undefined;
     const smtp = await getSmtpSettingsForAdmin();
+    const currentUser = (req as any).currentUser;
     return render(reply, 'admin_settings.njk', {
       ok,
       error,
+      testOk,
+      testError,
+      testRecipientDefault: String(currentUser?.email ?? '').trim(),
       smtp: {
         host: smtp.host,
         port: smtp.port,
@@ -1586,6 +1611,40 @@ export async function buildApp(params: {
       return reply.code(303).redirect(`/admin/settings?ok=${encodeURIComponent('SMTP settings saved.')}`);
     } catch (err: any) {
       return reply.code(303).redirect(`/admin/settings?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/admin/settings/smtp/test', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const to = String(body.to ?? '').trim();
+    const smtp = await resolveSmtpConfig(params.db);
+
+    try {
+      if (!to || !to.includes('@') || /\s/.test(to) || to.includes('\n') || to.includes('\r')) {
+        throw new Error('Valid recipient email is required.');
+      }
+      if (!smtp.host || !smtp.fromEmail) {
+        throw new Error('SMTP is not configured. Save SMTP host and from email first.');
+      }
+
+      await sendEmail(
+        {
+          to,
+          subject: 'LocalShifts SMTP test email',
+          text: [
+            'This is a test email from LocalShifts.',
+            '',
+            `Sent at: ${new Date().toISOString()}`
+          ].join('\n')
+        },
+        { db: params.db }
+      );
+      return reply.code(303).redirect(`/admin/settings?testOk=${encodeURIComponent(`Test email sent to ${to}.`)}`);
+    } catch (err: any) {
+      return reply
+        .code(303)
+        .redirect(`/admin/settings?testErr=${encodeURIComponent(`Test email failed: ${String(err?.message ?? err)}`)}`);
     }
   });
 
