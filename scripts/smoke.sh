@@ -47,7 +47,7 @@ http_post_json() {
 }
 
 check_healthz() {
-  say "[1/6] GET /healthz"
+  say "[1/7] GET /healthz"
   body="$(http_get "$BASE_URL/healthz" || true)"
   if printf '%s' "$body" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
     say "  OK"
@@ -59,7 +59,7 @@ check_healthz() {
 }
 
 check_ops_health() {
-  say "[2/6] GET /ops/health"
+  say "[2/7] GET /ops/health"
   if [ -z "$ADMIN_TOKEN" ]; then
     say "  SKIP: ADMIN_TOKEN not set"
     return 0
@@ -76,7 +76,7 @@ check_ops_health() {
 }
 
 check_ops_templates() {
-  say "[3/6] GET /ops/templates/compile"
+  say "[3/7] GET /ops/templates/compile"
   if [ -z "$ADMIN_TOKEN" ]; then
     say "  SKIP: ADMIN_TOKEN not set"
     return 0
@@ -93,7 +93,7 @@ check_ops_templates() {
 }
 
 check_public_pages() {
-  say "[4/6] GET / (HTML)"
+  say "[4/7] GET / (HTML)"
   code="$(http_status_html "$BASE_URL/" || true)"
   if [ "$code" = "200" ]; then
     say "  OK"
@@ -103,19 +103,29 @@ check_public_pages() {
     fail=1
   fi
 
-  say "[5/6] GET /admin/login (HTML)"
-  code="$(http_status_html "$BASE_URL/admin/login" || true)"
+  say "[5/7] GET /login (HTML)"
+  code="$(http_status_html "$BASE_URL/login" || true)"
   if [ "$code" = "200" ] || [ "$code" = "303" ]; then
     say "  OK"
   else
     say "  FAIL: HTTP $code"
+    curl -sS --max-time 10 -H 'accept: text/html' "$BASE_URL/login" 2>/dev/null | sed -n '1,5p' || true
+    fail=1
+  fi
+
+  say "[6/7] GET /admin/login (legacy surface removed)"
+  code="$(http_status_html "$BASE_URL/admin/login" || true)"
+  if [ "$code" = "404" ]; then
+    say "  OK"
+  else
+    say "  FAIL: expected 404, got HTTP $code"
     curl -sS --max-time 10 -H 'accept: text/html' "$BASE_URL/admin/login" 2>/dev/null | sed -n '1,5p' || true
     fail=1
   fi
 }
 
 check_email_test() {
-  say "[6/6] POST /ops/email/test"
+  say "[7/7] POST /ops/email/test"
   if [ -z "$ADMIN_TOKEN" ]; then
     say "  SKIP: ADMIN_TOKEN not set"
     return 0

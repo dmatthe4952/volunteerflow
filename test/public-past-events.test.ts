@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { sql } from 'kysely';
 import { loadAppForTest } from './helpers/env.js';
 import { migrationsDirFromRepoRoot, resetDb } from './helpers/db.js';
 
@@ -137,6 +138,10 @@ describe.skipIf(!DATABASE_URL)('public past events archive', () => {
     const res = await app.inject({ method: 'GET', url: '/events/past' });
     expect(res.statusCode).toBe(200);
     expect(String(res.body)).toContain(title);
+
+    const homeRes = await app.inject({ method: 'GET', url: '/' });
+    expect(homeRes.statusCode).toBe(200);
+    expect(String(homeRes.body)).toContain('Browse past events');
   });
 
   test('production default hides /events/past', async () => {
@@ -157,5 +162,40 @@ describe.skipIf(!DATABASE_URL)('public past events archive', () => {
 
     const res = await app.inject({ method: 'GET', url: '/events/past' });
     expect(res.statusCode).toBe(404);
+
+    const homeRes = await app.inject({ method: 'GET', url: '/' });
+    expect(homeRes.statusCode).toBe(200);
+    expect(String(homeRes.body)).not.toContain('Browse past events');
+  });
+
+  test('production shows past-events homepage link when toggle is enabled', async () => {
+    const { createDb, buildApp } = await loadAppForTest({
+      APP_ENV: 'production',
+      APP_PORT: '3000',
+      APP_URL: 'http://localhost:3000',
+      APP_TIMEZONE: 'America/New_York',
+      DATABASE_URL: DATABASE_URL!,
+      SESSION_SECRET: 'test-only-change-me',
+      ADMIN_TOKEN: 'test-ops-change-me'
+    });
+
+    const db = createDb();
+    await resetDb(db);
+    await db
+      .insertInto('system_settings')
+      .values({
+        key: 'PAST_EVENTS_ENABLED',
+        value_encrypted: sql<Buffer>`convert_to(${'true'}, 'UTF8')` as any
+      })
+      .execute();
+    await seedPastEvent(db);
+    const app = await buildApp({ db, runMigrations: false, logger: false });
+
+    const homeRes = await app.inject({ method: 'GET', url: '/' });
+    expect(homeRes.statusCode).toBe(200);
+    expect(String(homeRes.body)).toContain('Browse past events');
+
+    const pastRes = await app.inject({ method: 'GET', url: '/events/past' });
+    expect(pastRes.statusCode).toBe(200);
   });
 });
