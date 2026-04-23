@@ -43,6 +43,7 @@ export const config = {
   timezone: resolveTimezone(),
   databaseUrl: requireEnv('DATABASE_URL'),
   sessionSecret: requireEnv('SESSION_SECRET'),
+  settingsEncryptionKey: process.env.SETTINGS_ENCRYPTION_KEY || requireEnv('SESSION_SECRET'),
   adminToken: process.env.ADMIN_TOKEN ?? '',
   logFile: process.env.APP_LOG_FILE ?? '',
   smtp: {

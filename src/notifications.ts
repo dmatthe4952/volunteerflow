@@ -82,7 +82,7 @@ async function sendAndRecord(params: {
     const isReminder = String(params.kind ?? '').startsWith('shift_reminder_');
     await retryAsync(
       async () => {
-        await sendEmail({ to: params.toEmail, subject: params.subject, text: params.body, html: params.html });
+        await sendEmail({ to: params.toEmail, subject: params.subject, text: params.body, html: params.html }, { db: params.db });
       },
       {
         attempts: isReminder ? 3 : 1,

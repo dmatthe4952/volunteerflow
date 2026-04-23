@@ -29,6 +29,7 @@ import {
 } from './public.js';
 import { cancelEventAndNotify, requireAdminToken } from './ops.js';
 import { canSendEmail, sendEmail } from './email.js';
+import { decryptSettingValue, encryptSettingValue } from './settings_crypto.js';
 import {
   authenticateUser,
   createSession,
@@ -45,7 +46,7 @@ import {
   sendSignupConfirmationWithKind
 } from './notifications.js';
 import { compileNunjucksTemplates } from './templates.js';
-import { setEventTags } from './tags.js';
+import { setEventTags, syncUnderstaffedTagForEvent } from './tags.js';
 import { purgeEventVolunteerPII } from './purge.js';
 
 function isValidEmail(email: string): boolean {
@@ -203,6 +204,13 @@ export async function buildApp(params: {
 
   const SYSTEM_SETTING_PAST_EVENTS_ENABLED = 'PAST_EVENTS_ENABLED';
   const SYSTEM_SETTING_DEFAULT_PURGE_DAYS = 'DEFAULT_PURGE_DAYS';
+  const SYSTEM_SETTING_SMTP_HOST = 'SMTP_HOST';
+  const SYSTEM_SETTING_SMTP_PORT = 'SMTP_PORT';
+  const SYSTEM_SETTING_SMTP_SECURE = 'SMTP_SECURE';
+  const SYSTEM_SETTING_SMTP_USER = 'SMTP_USER';
+  const SYSTEM_SETTING_SMTP_PASS = 'SMTP_PASS';
+  const SYSTEM_SETTING_SMTP_FROM_NAME = 'SMTP_FROM_NAME';
+  const SYSTEM_SETTING_SMTP_FROM_EMAIL = 'SMTP_FROM_EMAIL';
   const defaultPastEventsEnabled = config.env === 'staging' || config.env === 'development' || config.env === 'test';
 
   function parseBooleanSetting(raw: string | null): boolean | null {
@@ -219,14 +227,18 @@ export async function buildApp(params: {
       .select((eb) => sql<string>`convert_from(${eb.ref('value_encrypted')}::bytea, 'UTF8')`.as('value'))
       .where('key', '=', key)
       .executeTakeFirst();
-    return row?.value ?? null;
+    if (!row?.value) return null;
+    return decryptSettingValue(String(row.value), config.settingsEncryptionKey);
   }
 
-  async function setSystemSetting(key: string, value: string) {
+  async function setSystemSetting(key: string, value: string, opts?: { encryptAtRest?: boolean }) {
+    const toStore = opts?.encryptAtRest ? encryptSettingValue(value, config.settingsEncryptionKey) : value;
     await params.db
       .insertInto('system_settings')
-      .values({ key, value_encrypted: sql<Buffer>`convert_to(${value}, 'UTF8')` as any })
-      .onConflict((oc) => oc.column('key').doUpdateSet({ value_encrypted: sql<Buffer>`convert_to(${value}, 'UTF8')`, updated_at: sql`now()` }))
+      .values({ key, value_encrypted: sql<Buffer>`convert_to(${toStore}, 'UTF8')` as any })
+      .onConflict((oc) =>
+        oc.column('key').doUpdateSet({ value_encrypted: sql<Buffer>`convert_to(${toStore}, 'UTF8')`, updated_at: sql`now()` })
+      )
       .execute();
   }
 
@@ -242,6 +254,30 @@ export async function buildApp(params: {
     const parsed = Number(String(raw ?? '').trim());
     if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 3650) return Math.floor(parsed);
     return 7;
+  }
+
+  async function getSmtpSettingsForAdmin() {
+    const host = (await getSystemSetting(SYSTEM_SETTING_SMTP_HOST)) ?? config.smtp.host;
+    const portRaw = (await getSystemSetting(SYSTEM_SETTING_SMTP_PORT)) ?? String(config.smtp.port ?? 587);
+    const secureRaw = (await getSystemSetting(SYSTEM_SETTING_SMTP_SECURE)) ?? (config.smtp.secure ? 'true' : 'false');
+    const user = (await getSystemSetting(SYSTEM_SETTING_SMTP_USER)) ?? config.smtp.user;
+    const pass = await getSystemSetting(SYSTEM_SETTING_SMTP_PASS);
+    const fromName = (await getSystemSetting(SYSTEM_SETTING_SMTP_FROM_NAME)) ?? config.smtp.fromName;
+    const fromEmail = (await getSystemSetting(SYSTEM_SETTING_SMTP_FROM_EMAIL)) ?? config.smtp.fromEmail;
+
+    const portNum = Number(portRaw);
+    const port = Number.isFinite(portNum) && portNum >= 1 && portNum <= 65535 ? Math.floor(portNum) : 587;
+    const secure = String(secureRaw).trim().toLowerCase() === 'true';
+
+    return {
+      host: String(host ?? '').trim(),
+      port,
+      secure,
+      user: String(user ?? '').trim(),
+      pass: String(pass ?? '').trim(),
+      fromName: String(fromName ?? '').trim(),
+      fromEmail: String(fromEmail ?? '').trim()
+    };
   }
 
   async function ensureSystemSettingsOnStartup() {
@@ -520,6 +556,26 @@ export async function buildApp(params: {
       if (deduped.length > 20) throw new Error('Too many tags (max 20).');
     }
     return deduped;
+  }
+
+  function parseTagNameInput(raw: unknown): { name: string; slug: string } {
+    const normalized = String(raw ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    if (!normalized) throw new Error('Tag name is required.');
+    if (normalized.length > 40) throw new Error('Tag name is too long (max 40 characters).');
+    const slug = slugify(normalized).slice(0, 60);
+    if (!slug) throw new Error('Tag name must include letters or numbers.');
+    return { name: normalized, slug };
+  }
+
+  async function syncUnderstaffed(eventId: string) {
+    try {
+      await syncUnderstaffedTagForEvent({ db: params.db, eventId });
+    } catch (err) {
+      app.log.warn({ err, eventId }, 'understaffed tag sync failed');
+    }
   }
 
   function parseRadiusMiles(raw: unknown): number | null {
@@ -1004,7 +1060,7 @@ export async function buildApp(params: {
         req.log.warn({ title, organization, organizer }, 'add-event submitted but no active super_admin users found');
       } else {
         for (const to of emails) {
-          await sendEmail({ to, subject, text: bodyText });
+          await sendEmail({ to, subject, text: bodyText }, { db: params.db });
         }
       }
 
@@ -1057,6 +1113,8 @@ export async function buildApp(params: {
 
     try {
       const { token } = await createSignup({ db: params.db, shiftId, firstName, lastName, email });
+      const shiftRow = await params.db.selectFrom('shifts').select(['event_id']).where('id', '=', shiftId).executeTakeFirst();
+      if (shiftRow?.event_id) await syncUnderstaffed(shiftRow.event_id);
       app.log.info({ shiftId, email }, 'signup created');
       if (config.env === 'development' || config.env === 'test') {
         app.log.info({ shiftId, email, token }, 'signup token generated');
@@ -1107,6 +1165,13 @@ export async function buildApp(params: {
     const note = typeof body.note === 'string' ? body.note : '';
     const res = await cancelSignup({ db: params.db, signupId: found.signupId, note });
     if (res.changed) {
+      const signupRow = await params.db
+        .selectFrom('signups')
+        .innerJoin('shifts', 'shifts.id', 'signups.shift_id')
+        .select(['shifts.event_id'])
+        .where('signups.id', '=', found.signupId)
+        .executeTakeFirst();
+      if (signupRow?.event_id) await syncUnderstaffed(signupRow.event_id);
       app.log.info({ signupId: found.signupId }, 'signup cancelled');
       try {
         await sendCancellationEmails(params.db, found.signupId, res.cancelledAt);
@@ -1150,7 +1215,7 @@ export async function buildApp(params: {
         app.log.info({ email, expiresAt }, 'my-signups token created');
       }
 
-      const hasSmtp = Boolean(config.smtp.host && config.smtp.fromEmail);
+      const hasSmtp = await canSendEmail(params.db);
 
       // In test we never send real email.
       // In development we show the shortcut only when SMTP isn't configured.
@@ -1162,7 +1227,7 @@ export async function buildApp(params: {
         });
       }
 
-      if (!canSendEmail()) {
+      if (!hasSmtp) {
         return reply.code(501).view('my_email_sent.njk', { email, error: 'Email sending is not configured yet.' });
       }
 
@@ -1180,7 +1245,7 @@ export async function buildApp(params: {
           '<p><a href="' + verifyUrlOneTime + '">Click to view signups</a></p>',
           '<p style="color:#666;font-size:14px;margin:0">This link can be used once and expires in 30 minutes.</p>'
         ].join('\n')
-      });
+      }, { db: params.db });
 
       return reply.code(303).redirect('/my?sent=1');
     } catch (err: any) {
@@ -1465,6 +1530,65 @@ export async function buildApp(params: {
     return reply.code(303).redirect(`/admin/dashboard?ok=${encodeURIComponent(msg)}`);
   });
 
+  app.get('/admin/settings', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const qs = req.query as Record<string, string | undefined>;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+    const smtp = await getSmtpSettingsForAdmin();
+    return render(reply, 'admin_settings.njk', {
+      ok,
+      error,
+      smtp: {
+        host: smtp.host,
+        port: smtp.port,
+        secure: smtp.secure,
+        user: smtp.user,
+        fromName: smtp.fromName,
+        fromEmail: smtp.fromEmail,
+        hasPass: Boolean(smtp.pass)
+      }
+    });
+  });
+
+  app.post('/admin/settings/smtp', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const host = String(body.host ?? '').trim();
+    const portRaw = String(body.port ?? '').trim();
+    const secure = String(body.secure ?? '').trim() === 'on' || String(body.secure ?? '').trim() === 'true';
+    const user = String(body.user ?? '').trim();
+    const passInput = String(body.pass ?? '');
+    const fromName = String(body.fromName ?? '').trim();
+    const fromEmail = String(body.fromEmail ?? '').trim();
+
+    try {
+      const port = Number(portRaw || '587');
+      if (!Number.isFinite(port) || port < 1 || port > 65535) throw new Error('SMTP port must be between 1 and 65535.');
+      if (host.length > 255) throw new Error('SMTP host is too long.');
+      if (user.length > 255) throw new Error('SMTP username is too long.');
+      if (fromName.length > 120) throw new Error('From name is too long.');
+      if (fromEmail && !isValidEmail(fromEmail)) throw new Error('From email is invalid.');
+      if (host && !fromEmail) throw new Error('From email is required when SMTP host is set.');
+      if (fromEmail && !host) throw new Error('SMTP host is required when From email is set.');
+
+      const existing = await getSmtpSettingsForAdmin();
+      const nextPass = passInput.trim() ? passInput.trim() : existing.pass;
+
+      await setSystemSetting(SYSTEM_SETTING_SMTP_HOST, host, { encryptAtRest: true });
+      await setSystemSetting(SYSTEM_SETTING_SMTP_PORT, String(Math.floor(port)), { encryptAtRest: true });
+      await setSystemSetting(SYSTEM_SETTING_SMTP_SECURE, secure ? 'true' : 'false', { encryptAtRest: true });
+      await setSystemSetting(SYSTEM_SETTING_SMTP_USER, user, { encryptAtRest: true });
+      await setSystemSetting(SYSTEM_SETTING_SMTP_PASS, nextPass, { encryptAtRest: true });
+      await setSystemSetting(SYSTEM_SETTING_SMTP_FROM_NAME, fromName, { encryptAtRest: true });
+      await setSystemSetting(SYSTEM_SETTING_SMTP_FROM_EMAIL, fromEmail, { encryptAtRest: true });
+
+      return reply.code(303).redirect(`/admin/settings?ok=${encodeURIComponent('SMTP settings saved.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/admin/settings?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
   app.post('/admin/impersonate', async (req, reply) => {
     const currentUser = requireRole(req, 'super_admin');
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -1626,6 +1750,107 @@ export async function buildApp(params: {
       eligibleEvents: eligible.map(mapRow),
       otherEvents: others.map(mapRow)
     });
+  });
+
+  app.get('/admin/tags', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const qs = req.query as Record<string, string | undefined>;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+
+    const rows = await params.db
+      .selectFrom('tags')
+      .leftJoin('users', 'users.id', 'tags.created_by')
+      .leftJoin('event_tags', 'event_tags.tag_id', 'tags.id')
+      .select([
+        'tags.id',
+        'tags.name',
+        'tags.slug',
+        'tags.is_system',
+        'tags.created_by',
+        'users.email as creator_email',
+        sql<number>`coalesce(count(distinct event_tags.event_id), 0)`.as('event_count')
+      ])
+      .groupBy(['tags.id', 'users.email'])
+      .orderBy('tags.is_system', 'desc')
+      .orderBy('tags.name', 'asc')
+      .execute();
+
+    return render(reply, 'admin_tags.njk', {
+      ok,
+      error,
+      tags: rows.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        slug: r.slug,
+        isSystem: Boolean(r.is_system),
+        eventCount: Number(r.event_count ?? 0),
+        creatorEmail: r.creator_email ?? null
+      }))
+    });
+  });
+
+  app.post('/admin/tags', async (req, reply) => {
+    const currentUser = requireRole(req, 'super_admin');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const { name, slug } = parseTagNameInput(body.name);
+      const existing = await params.db.selectFrom('tags').select(['id', 'name']).where('slug', '=', slug).executeTakeFirst();
+      if (existing) throw new Error(`Tag "${existing.name}" already exists.`);
+
+      await params.db
+        .insertInto('tags')
+        .values({
+          name,
+          slug,
+          is_system: false,
+          created_by: currentUser.id
+        })
+        .execute();
+      return reply.code(303).redirect(`/admin/tags?ok=${encodeURIComponent('Tag created.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/admin/tags?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/admin/tags/:id/update', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const tag = await params.db.selectFrom('tags').select(['id', 'name', 'slug', 'is_system']).where('id', '=', id).executeTakeFirst();
+      if (!tag) throw new Error('Tag not found.');
+      if (tag.is_system) throw new Error('System tags cannot be edited.');
+
+      const { name, slug } = parseTagNameInput(body.name);
+      const duplicate = await params.db
+        .selectFrom('tags')
+        .select(['id', 'name'])
+        .where('slug', '=', slug)
+        .where('id', '!=', id)
+        .executeTakeFirst();
+      if (duplicate) throw new Error(`Tag "${duplicate.name}" already exists.`);
+
+      await params.db.updateTable('tags').set({ name, slug }).where('id', '=', id).execute();
+      return reply.code(303).redirect(`/admin/tags?ok=${encodeURIComponent('Tag updated.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/admin/tags?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/admin/tags/:id/delete', async (req, reply) => {
+    requireRole(req, 'super_admin');
+    const { id } = req.params as { id: string };
+    try {
+      const tag = await params.db.selectFrom('tags').select(['id', 'is_system']).where('id', '=', id).executeTakeFirst();
+      if (!tag) throw new Error('Tag not found.');
+      if (tag.is_system) throw new Error('System tags cannot be deleted.');
+
+      await params.db.deleteFrom('tags').where('id', '=', id).execute();
+      return reply.code(303).redirect(`/admin/tags?ok=${encodeURIComponent('Tag deleted.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/admin/tags?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
   });
 
   app.get('/admin/events/:id/delete', async (req, reply) => {
@@ -2318,6 +2543,125 @@ export async function buildApp(params: {
       upcomingShifts: upcomingMapped,
       understaffedCount
     });
+  });
+
+  app.get('/manager/tags', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const qs = req.query as Record<string, string | undefined>;
+    const ok = typeof qs.ok === 'string' ? qs.ok : undefined;
+    const error = typeof qs.err === 'string' ? qs.err : undefined;
+
+    const rows = await params.db
+      .selectFrom('tags')
+      .leftJoin('users', 'users.id', 'tags.created_by')
+      .leftJoin('event_tags', 'event_tags.tag_id', 'tags.id')
+      .select([
+        'tags.id',
+        'tags.name',
+        'tags.slug',
+        'tags.is_system',
+        'tags.created_by',
+        'users.email as creator_email',
+        sql<number>`coalesce(count(distinct event_tags.event_id), 0)`.as('event_count')
+      ])
+      .groupBy(['tags.id', 'users.email'])
+      .orderBy('tags.is_system', 'desc')
+      .orderBy('tags.name', 'asc')
+      .execute();
+
+    return render(reply, 'manager_tags.njk', {
+      ok,
+      error,
+      tags: rows.map((r: any) => {
+        const creatorId = r.created_by ? String(r.created_by) : null;
+        const isMine = creatorId === currentUser.id;
+        return {
+          id: r.id,
+          name: r.name,
+          slug: r.slug,
+          isSystem: Boolean(r.is_system),
+          eventCount: Number(r.event_count ?? 0),
+          creatorEmail: r.creator_email ?? null,
+          isMine,
+          canEdit: !r.is_system && isMine,
+          canDelete: !r.is_system && isMine
+        };
+      })
+    });
+  });
+
+  app.post('/manager/tags', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const { name, slug } = parseTagNameInput(body.name);
+      const existing = await params.db.selectFrom('tags').select(['id', 'name']).where('slug', '=', slug).executeTakeFirst();
+      if (existing) throw new Error(`Tag "${existing.name}" already exists.`);
+
+      await params.db
+        .insertInto('tags')
+        .values({
+          name,
+          slug,
+          is_system: false,
+          created_by: currentUser.id
+        })
+        .execute();
+
+      return reply.code(303).redirect(`/manager/tags?ok=${encodeURIComponent('Tag created.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/tags?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/manager/tags/:id/update', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const tag = await params.db
+        .selectFrom('tags')
+        .select(['id', 'name', 'slug', 'is_system', 'created_by'])
+        .where('id', '=', id)
+        .executeTakeFirst();
+      if (!tag) throw new Error('Tag not found.');
+      if (tag.is_system) throw new Error('System tags cannot be edited.');
+      if ((tag.created_by ?? null) !== currentUser.id) throw new Error('You can only edit tags you created.');
+
+      const { name, slug } = parseTagNameInput(body.name);
+      const duplicate = await params.db
+        .selectFrom('tags')
+        .select(['id', 'name'])
+        .where('slug', '=', slug)
+        .where('id', '!=', id)
+        .executeTakeFirst();
+      if (duplicate) throw new Error(`Tag "${duplicate.name}" already exists.`);
+
+      await params.db.updateTable('tags').set({ name, slug }).where('id', '=', id).execute();
+      return reply.code(303).redirect(`/manager/tags?ok=${encodeURIComponent('Tag updated.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/tags?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
+  });
+
+  app.post('/manager/tags/:id/delete', async (req, reply) => {
+    const currentUser = requireRole(req, 'event_manager');
+    const { id } = req.params as { id: string };
+    try {
+      const tag = await params.db
+        .selectFrom('tags')
+        .select(['id', 'is_system', 'created_by'])
+        .where('id', '=', id)
+        .executeTakeFirst();
+      if (!tag) throw new Error('Tag not found.');
+      if (tag.is_system) throw new Error('System tags cannot be deleted.');
+      if ((tag.created_by ?? null) !== currentUser.id) throw new Error('You can only delete tags you created.');
+
+      await params.db.deleteFrom('tags').where('id', '=', id).execute();
+      return reply.code(303).redirect(`/manager/tags?ok=${encodeURIComponent('Tag deleted.')}`);
+    } catch (err: any) {
+      return reply.code(303).redirect(`/manager/tags?err=${encodeURIComponent(String(err?.message ?? err))}`);
+    }
   });
 
   // Admin organizations (needed before managers can create events)
@@ -3171,6 +3515,7 @@ export async function buildApp(params: {
       .where('id', '=', id)
       .where('manager_id', '=', currentUser.id)
       .execute();
+    await syncUnderstaffed(id);
 
     return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Event archived. It is now unpublished.')}`);
   });
@@ -3194,6 +3539,7 @@ export async function buildApp(params: {
       .where('id', '=', id)
       .where('manager_id', '=', currentUser.id)
       .execute();
+    await syncUnderstaffed(id);
 
     return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Event unarchived. Publish when ready.')}`);
   });
@@ -3245,6 +3591,7 @@ export async function buildApp(params: {
           is_active: true
         })
         .execute();
+      await syncUnderstaffed(id);
       return reply.code(303).redirect(`/manager/events/${id}/edit`);
     } catch (err: any) {
       return reply.code(303).redirect(`/manager/events/${id}/edit?err=${encodeURIComponent(String(err?.message ?? err))}`);
@@ -3300,6 +3647,7 @@ export async function buildApp(params: {
           is_active: true
         })
         .execute();
+      await syncUnderstaffed(id);
 
       return reply.code(303).redirect(`/manager/events/${id}/edit?ok=${encodeURIComponent('Shift added from template.')}`);
     } catch (err: any) {
@@ -3319,6 +3667,7 @@ export async function buildApp(params: {
       .executeTakeFirst();
     if (!row) return reply.code(404).view('not_found.njk', { message: 'Shift not found.' });
     await params.db.updateTable('shifts').set({ is_active: !row.is_active }).where('id', '=', id).execute();
+    await syncUnderstaffed(row.event_id);
     return reply.code(303).redirect(`/manager/events/${row.event_id}/edit`);
   });
 
@@ -3379,6 +3728,7 @@ export async function buildApp(params: {
         })
         .where('id', '=', id)
         .execute();
+      await syncUnderstaffed(row.event_id);
 
       return reply.code(303).redirect(`/manager/events/${eventId || row.event_id}/edit#shift-${id}`);
     } catch (err: any) {
@@ -3411,6 +3761,7 @@ export async function buildApp(params: {
       if (Number(count?.c ?? 0) > 0) throw new Error('Cannot delete a shift that has signups. Deactivate it instead.');
 
       await params.db.deleteFrom('shifts').where('id', '=', id).execute();
+      await syncUnderstaffed(row.event_id);
       return reply.code(303).redirect(`/manager/events/${eventId || row.event_id}/edit`);
     } catch (err: any) {
       const msg = String(err?.message ?? err);
@@ -3434,6 +3785,7 @@ export async function buildApp(params: {
     const message = String(body.message ?? '');
     try {
       const res = await cancelEventAndNotify({ db: params.db, slugOrId: id, message });
+      await syncUnderstaffed(id);
       return reply
         .code(303)
         .redirect(
@@ -3623,7 +3975,7 @@ export async function buildApp(params: {
           .executeTakeFirstOrThrow();
 
         try {
-          await sendEmail({ to: r.email, subject, text });
+          await sendEmail({ to: r.email, subject, text }, { db: params.db });
           sent += 1;
           await params.db
             .updateTable('notification_sends')
@@ -3816,6 +4168,7 @@ export async function buildApp(params: {
 
       // Reuse volunteer signup logic (includes duplicate protection + token creation) but without "must be published".
       const created = await createSignup({ db: params.db, shiftId, firstName, lastName, email, allowUnpublished: true });
+      await syncUnderstaffed(id);
       try {
         await sendSignupConfirmation(params.db, created.signupId);
       } catch (err) {
@@ -3849,6 +4202,7 @@ export async function buildApp(params: {
       .where('id', '=', signupId)
       .where('status', '=', 'active')
       .execute();
+    await syncUnderstaffed(row.event_id);
 
     try {
       await sendManagerRemovalNotice(params.db, signupId);
@@ -3906,6 +4260,12 @@ export async function buildApp(params: {
       }
       const message = String(body.message ?? '');
       const res = await cancelEventAndNotify({ db: params.db, slugOrId, message });
+      const event = await params.db
+        .selectFrom('events')
+        .select(['id'])
+        .where(sql<boolean>`(events.slug = ${slugOrId} or events.id::text = ${slugOrId})`)
+        .executeTakeFirst();
+      if (event?.id) await syncUnderstaffed(event.id);
       return reply.send(res);
     } catch (err: any) {
       const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : 400;
@@ -3933,7 +4293,7 @@ export async function buildApp(params: {
       if (!subject || subject.length > 200 || subject.includes('\n') || subject.includes('\r')) throw new Error('Valid `subject` is required.');
       if (!text || text.length > 20_000) throw new Error('Valid `text` is required.');
 
-      await sendEmail({ to, subject, text });
+      await sendEmail({ to, subject, text }, { db: params.db });
       return reply.send({ ok: true });
     } catch (err: any) {
       const statusCode = typeof err?.statusCode === 'number' ? err.statusCode : 400;

@@ -1,0 +1,64 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>System Settings</h1>
+  <div class="crumbs">
+    <a href="/admin/dashboard">Admin</a>
+    <span class="sep">/</span>
+    <span>Settings</span>
+  </div>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+  {% if ok %}
+    <div class="flash ok"><div>{{ ok }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="title">SMTP</div>
+    <p class="muted" style="margin-top:8px">Configure outbound email delivery for confirmations, reminders, and cancellations.</p>
+
+    <form class="form" method="post" action="/admin/settings/smtp" style="margin-top:10px">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+      <div class="grid2">
+        <label>
+          <span>SMTP host</span>
+          <input name="host" maxlength="255" value="{{ smtp.host }}" placeholder="smtp.example.com" />
+        </label>
+        <label>
+          <span>SMTP port</span>
+          <input name="port" type="number" min="1" max="65535" value="{{ smtp.port }}" />
+        </label>
+      </div>
+      <label>
+        <span>
+          <input type="checkbox" name="secure" {% if smtp.secure %}checked{% endif %} />
+          Use TLS/SSL (secure)
+        </span>
+      </label>
+      <div class="grid2">
+        <label>
+          <span>SMTP username (optional)</span>
+          <input name="user" maxlength="255" value="{{ smtp.user }}" />
+        </label>
+        <label>
+          <span>SMTP password (optional)</span>
+          <input name="pass" type="password" autocomplete="new-password" placeholder="{% if smtp.hasPass %}Leave blank to keep current password{% endif %}" />
+        </label>
+      </div>
+      <div class="grid2">
+        <label>
+          <span>From name</span>
+          <input name="fromName" maxlength="120" value="{{ smtp.fromName }}" placeholder="LocalShifts" />
+        </label>
+        <label>
+          <span>From email</span>
+          <input name="fromEmail" type="email" maxlength="120" value="{{ smtp.fromEmail }}" placeholder="no-reply@example.com" />
+        </label>
+      </div>
+      <div class="actions">
+        <button class="btn primary" type="submit">Save SMTP Settings</button>
+      </div>
+    </form>
+  </div>
+{% endblock %}

@@ -103,7 +103,7 @@ export async function cancelEventAndNotify(params: { db: Kysely<DB>; slugOrId: s
     if (!inserted) continue; // already sent
 
     try {
-      await sendEmail({ to: s.email, subject, text });
+      await sendEmail({ to: s.email, subject, text }, { db: params.db });
       notified++;
       await params.db
         .updateTable('notification_sends')

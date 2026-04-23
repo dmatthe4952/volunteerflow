@@ -1,0 +1,76 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>Tags</h1>
+  <div class="crumbs">
+    <a href="/manager/dashboard">Manager dashboard</a>
+    <span class="sep">/</span>
+    <span>Tags</span>
+  </div>
+
+  {% if error %}
+    <div class="flash err"><div>{{ error }}</div></div>
+  {% endif %}
+  {% if ok %}
+    <div class="flash ok"><div>{{ ok }}</div></div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="title">Create tag</div>
+    <p class="muted" style="margin-top:8px">Tag names are unique (case-insensitive). Example: <code>food bank</code>.</p>
+    <form class="form" method="post" action="/manager/tags" style="margin-top:10px">
+      <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+      <label>
+        <span>Name</span>
+        <input name="name" required maxlength="40" placeholder="e.g. food bank" />
+      </label>
+      <div class="actions">
+        <button class="btn primary" type="submit">Create Tag</button>
+      </div>
+    </form>
+  </div>
+
+  <h2 style="margin-top:18px">All tags</h2>
+  {% if not tags or tags.length == 0 %}
+    <div class="panel"><p class="muted">No tags yet.</p></div>
+  {% else %}
+    <div class="stack">
+      {% for t in tags %}
+        <div class="panel">
+          <div class="shift-top">
+            <div>
+              <div class="title">{{ t.name }}</div>
+              <div class="meta">
+                Slug: <code>{{ t.slug }}</code>
+                {% if t.isSystem %} • System{% endif %}
+                {% if t.isMine %} • Created by you{% elif t.creatorEmail %} • Created by {{ t.creatorEmail }}{% endif %}
+              </div>
+            </div>
+            <div class="right"><span class="badge">Used by {{ t.eventCount }} event(s)</span></div>
+          </div>
+
+          {% if t.canEdit %}
+            <form class="form" method="post" action="/manager/tags/{{ t.id }}/update" style="margin-top:10px">
+              <input type="hidden" name="csrfToken" value="{{ csrfToken }}" />
+              <label>
+                <span>Rename</span>
+                <input name="name" required maxlength="40" value="{{ t.name }}" />
+              </label>
+              <div class="actions">
+                <button class="btn primary" type="submit">Save</button>
+                <button class="btn danger" formmethod="post" formaction="/manager/tags/{{ t.id }}/delete" type="submit">Delete</button>
+              </div>
+            </form>
+          {% else %}
+            <p class="muted" style="margin-top:10px">
+              {% if t.isSystem %}
+                System tags are managed automatically and cannot be edited or deleted.
+              {% else %}
+                You can use this tag on your events, but only its creator can edit or delete it.
+              {% endif %}
+            </p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}
