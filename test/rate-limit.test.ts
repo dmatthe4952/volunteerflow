@@ -86,5 +86,25 @@ describe.skipIf(!DATABASE_URL)('route-specific unauthenticated rate limits', () 
     expect(statuses.slice(0, 5).every((s) => s !== 429)).toBe(true);
     expect(statuses[5]).toBe(429);
   });
-});
 
+  test('POST /login is limited to 10 attempts per 15 minutes per IP', async () => {
+    const payload = formEncode({ email: 'nope@example.com', password: 'wrong-password', role: 'admin' });
+    const statuses: number[] = [];
+
+    for (let i = 0; i < 11; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/login',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          'x-forwarded-for': '198.51.100.42'
+        },
+        payload
+      });
+      statuses.push(res.statusCode);
+    }
+
+    expect(statuses.slice(0, 10).every((s) => s !== 429)).toBe(true);
+    expect(statuses[10]).toBe(429);
+  });
+});

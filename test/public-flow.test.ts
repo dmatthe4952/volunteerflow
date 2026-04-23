@@ -93,6 +93,29 @@ describe.skipIf(!DATABASE_URL)('public volunteer flows', () => {
     expect(resView2.statusCode).toBe(410);
   });
 
+  test('my-signups token expiry is one hour from issuance', async () => {
+    const reqTime = Date.now();
+    const resReq = await app.inject({
+      method: 'POST',
+      url: '/my/request',
+      payload: { email: 'ada@example.com' }
+    });
+    expect(resReq.statusCode).toBe(200);
+
+    const row = await db
+      .selectFrom('volunteer_email_tokens')
+      .select(['expires_at', 'created_at'])
+      .where('email', '=', 'ada@example.com')
+      .orderBy('created_at', 'desc')
+      .executeTakeFirstOrThrow();
+
+    const expiresAtMs = Date.parse(String(row.expires_at));
+    const createdAtMs = Date.parse(String(row.created_at));
+    expect(expiresAtMs - createdAtMs).toBeGreaterThanOrEqual(59 * 60 * 1000);
+    expect(expiresAtMs - createdAtMs).toBeLessThanOrEqual(61 * 60 * 1000);
+    expect(expiresAtMs).toBeGreaterThan(reqTime + 59 * 60 * 1000);
+  });
+
   test('clearing device removes cookie but user can paste link and view (no re-signup needed)', async () => {
     const { eventSlug, shiftId } = await seedBasicEvent(db);
     const resSignup = await app.inject({

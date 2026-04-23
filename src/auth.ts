@@ -50,6 +50,31 @@ export type CurrentUser = {
   };
 };
 
+export const SESSION_INACTIVITY_TIMEOUT_MS = 8 * 60 * 60 * 1000;
+export const SESSION_ABSOLUTE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const SESSION_RENEWAL_GRACE_MS = 5 * 60 * 1000;
+
+type SessionLifecycleData = {
+  created_at_ms?: number;
+  last_seen_at_ms?: number;
+};
+
+function parseFiniteNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return value;
+}
+
+function parseTimestampMs(value: unknown): number | null {
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string' || !value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 export async function findUserByEmail(db: Kysely<DB>, email: string) {
   const emailNorm = email.trim().toLowerCase();
   if (!emailNorm) return null;
@@ -98,13 +123,18 @@ export async function hasAnySuperAdmin(db: Kysely<DB>): Promise<boolean> {
   return Number(row?.c ?? 0) > 0;
 }
 
-export async function createSession(db: Kysely<DB>, params: { userId: string; ttlDays: number }) {
-  const expiresAt = new Date(Date.now() + params.ttlDays * 24 * 60 * 60 * 1000).toISOString();
+export async function createSession(db: Kysely<DB>, params: { userId: string }) {
+  const nowMs = Date.now();
+  const lifecycleData: SessionLifecycleData = {
+    created_at_ms: nowMs,
+    last_seen_at_ms: nowMs
+  };
+  const expiresAt = new Date(nowMs + SESSION_INACTIVITY_TIMEOUT_MS).toISOString();
   const row = await db
     .insertInto('sessions')
     .values({
       user_id: params.userId,
-      data: {},
+      data: lifecycleData,
       expires_at: expiresAt
     })
     .returning(['id', 'expires_at'])
@@ -147,6 +177,8 @@ export async function loadCurrentUserFromSession(db: Kysely<DB>, sessionId: stri
       'users.role',
       'users.is_active',
       'sessions.expires_at',
+      'sessions.created_at',
+      'sessions.updated_at',
       'sessions.data'
     ])
     .where('sessions.id', '=', sessionId)
@@ -154,11 +186,45 @@ export async function loadCurrentUserFromSession(db: Kysely<DB>, sessionId: stri
 
   if (!row) return null;
   if (!row.is_active) return null;
-  if (Date.parse(row.expires_at) < Date.now()) return null;
+  const nowMs = Date.now();
+  const expiresAtMs = parseTimestampMs(row.expires_at);
+  if (expiresAtMs == null || expiresAtMs < nowMs) return null;
+
+  const rawData = typeof row.data === 'object' && row.data != null ? (row.data as Record<string, unknown>) : {};
+  const createdAtMs =
+    parseFiniteNumber(rawData.created_at_ms) ?? parseTimestampMs(row.created_at) ?? parseTimestampMs(row.updated_at) ?? nowMs;
+  const lastSeenAtMs = parseFiniteNumber(rawData.last_seen_at_ms) ?? parseTimestampMs(row.updated_at) ?? createdAtMs;
+
+  const absoluteExpiryMs = createdAtMs + SESSION_ABSOLUTE_TIMEOUT_MS;
+  if (!Number.isFinite(absoluteExpiryMs) || absoluteExpiryMs <= nowMs) return null;
+
+  const inactiveForMs = nowMs - lastSeenAtMs;
+  if (!Number.isFinite(inactiveForMs) || inactiveForMs > SESSION_INACTIVITY_TIMEOUT_MS) return null;
+
+  const requiresMetadataBackfill =
+    parseFiniteNumber(rawData.created_at_ms) == null || parseFiniteNumber(rawData.last_seen_at_ms) == null;
+  const shouldRenewActivity = requiresMetadataBackfill || inactiveForMs >= SESSION_RENEWAL_GRACE_MS;
+  if (shouldRenewActivity) {
+    const renewedExpiresAtMs = Math.min(nowMs + SESSION_INACTIVITY_TIMEOUT_MS, absoluteExpiryMs);
+    if (renewedExpiresAtMs <= nowMs) return null;
+    const nextData = { ...rawData, created_at_ms: createdAtMs, last_seen_at_ms: nowMs };
+    try {
+      await db
+        .updateTable('sessions')
+        .set({
+          data: sql`${JSON.stringify(nextData)}::jsonb`,
+          expires_at: new Date(renewedExpiresAtMs).toISOString()
+        })
+        .where('id', '=', sessionId)
+        .execute();
+    } catch {
+      // Keep request authentication non-blocking if metadata refresh fails.
+    }
+  }
 
   const baseUser: CurrentUser = { id: row.user_id, email: row.email, displayName: row.display_name, role: row.role };
 
-  const data = row.data as any;
+  const data = rawData as any;
   const impersonateUserId = typeof data?.impersonate_user_id === 'string' ? data.impersonate_user_id : '';
   if (!impersonateUserId) return baseUser;
   if (baseUser.role !== 'super_admin') return baseUser;
