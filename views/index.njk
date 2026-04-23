@@ -82,6 +82,9 @@
               <div class="card-meta">
                 <div class="card-date">{{ event.dateRange }}</div>
                 <div class="right" style="gap:6px; flex-wrap:wrap; justify-content:flex-end">
+                  {% if event.isFull %}
+                    <span class="badge">Full</span>
+                  {% endif %}
                   {% if event.distanceMiles != null %}
                     <span class="badge">{{ event.distanceMiles }} mi</span>
                   {% endif %}
@@ -125,6 +128,9 @@
               <div class="card-meta">
                 <div class="card-date">{{ event.dateRange }}</div>
                 <div class="right" style="gap:6px; flex-wrap:wrap; justify-content:flex-end">
+                  {% if event.isFull %}
+                    <span class="badge">Full</span>
+                  {% endif %}
                   {% if event.distanceMiles != null %}
                     <span class="badge">{{ event.distanceMiles }} mi</span>
                   {% endif %}

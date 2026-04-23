@@ -1,0 +1,15 @@
+[1/7] GET /healthz
+  OK
+[2/7] GET /ops/health
+  SKIP: ADMIN_TOKEN not set
+[3/7] GET /ops/templates/compile
+  SKIP: ADMIN_TOKEN not set
+[4/7] GET / (HTML)
+  OK
+[5/7] GET /login (HTML)
+  OK
+[6/7] GET /admin/login (legacy surface removed)
+  OK
+[7/7] POST /ops/email/test
+  SKIP: ADMIN_TOKEN not set
+Smoke test: OK

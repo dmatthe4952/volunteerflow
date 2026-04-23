@@ -99,10 +99,11 @@ describe.skipIf(!DATABASE_URL)('public homepage listing', () => {
     dayOffset: number;
     updatedAt: string;
     withShift?: boolean;
+    maxVolunteers?: number;
     locationLat?: string | null;
     locationLng?: string | null;
     organizationId?: string;
-  }) {
+  }): Promise<string> {
     const slug = params.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     const date = ymdOffset(params.dayOffset);
     const event = await db
@@ -142,11 +143,12 @@ describe.skipIf(!DATABASE_URL)('public homepage listing', () => {
           start_time: '10:00:00',
           end_time: '11:00:00',
           min_volunteers: 1,
-          max_volunteers: 2,
+          max_volunteers: params.maxVolunteers ?? 2,
           is_active: true
         })
         .execute();
     }
+    return event.id;
   }
 
   async function createOrganization(name: string, slug: string): Promise<string> {
@@ -337,5 +339,101 @@ describe.skipIf(!DATABASE_URL)('public homepage listing', () => {
     const filteredBody = String(filteredRes.body);
     expect(filteredBody).toContain(orgTwoEvent);
     expect(filteredBody).not.toContain(orgOneEvent);
+  });
+
+  test('homepage renders Full badge when all slots are filled', async () => {
+    const suffix = crypto.randomBytes(3).toString('hex');
+    const fullTitle = `Full Event ${suffix}`;
+    const openTitle = `Open Event ${suffix}`;
+
+    const fullEventId = await createEvent({
+      title: fullTitle,
+      isFeatured: false,
+      dayOffset: 8,
+      updatedAt: '2026-04-10T10:00:00.000Z',
+      maxVolunteers: 1
+    });
+    await createEvent({
+      title: openTitle,
+      isFeatured: false,
+      dayOffset: 8,
+      updatedAt: '2026-04-10T10:00:00.000Z',
+      maxVolunteers: 2
+    });
+
+    const fullShift = await db
+      .selectFrom('shifts')
+      .select(['id'])
+      .where('event_id', '=', fullEventId)
+      .executeTakeFirstOrThrow();
+
+    await db
+      .insertInto('signups')
+      .values({
+        shift_id: fullShift.id,
+        first_name: 'Ada',
+        last_name: 'L',
+        email: 'ada@example.com',
+        status: 'active',
+        cancel_token: 'a'.repeat(64),
+        cancel_token_hmac: Buffer.from('abc'),
+        cancel_token_expires_at: new Date(Date.now() + 86400000).toISOString()
+      })
+      .execute();
+
+    const res = await app.inject({ method: 'GET', url: '/' });
+    expect(res.statusCode).toBe(200);
+    const body = String(res.body);
+    expect(body).toContain(fullTitle);
+    expect(body).toContain(openTitle);
+    expect((body.match(/<span class="badge">Full<\/span>/g) ?? []).length).toBe(1);
+  });
+
+  test('location cookie persists filter and loc=clear removes it', async () => {
+    const suffix = crypto.randomBytes(3).toString('hex');
+    const nearby = `Cookie Nearby Event ${suffix}`;
+    const farAway = `Cookie Far Event ${suffix}`;
+
+    await createEvent({
+      title: nearby,
+      isFeatured: false,
+      dayOffset: 8,
+      updatedAt: '2026-04-10T10:00:00.000Z',
+      locationLat: '40.7500',
+      locationLng: '-73.9970'
+    });
+    await createEvent({
+      title: farAway,
+      isFeatured: false,
+      dayOffset: 8,
+      updatedAt: '2026-04-10T10:00:00.000Z',
+      locationLat: '37.7749',
+      locationLng: '-122.4194'
+    });
+
+    const setLocRes = await app.inject({ method: 'GET', url: '/?lat=40.7505&lng=-73.9965&radius=20' });
+    expect(setLocRes.statusCode).toBe(200);
+    expect(String(setLocRes.body)).toContain('Showing events near your current location');
+
+    const setCookie = setLocRes.headers['set-cookie'];
+    const cookieHeader = (Array.isArray(setCookie) ? setCookie : [setCookie])
+      .map((line) => String(line ?? '').split(';')[0])
+      .filter(Boolean)
+      .join('; ');
+    expect(cookieHeader).toContain('vf_loc=');
+
+    const persistedRes = await app.inject({ method: 'GET', url: '/', headers: { cookie: cookieHeader } });
+    expect(persistedRes.statusCode).toBe(200);
+    const persistedBody = String(persistedRes.body);
+    expect(persistedBody).toContain('Showing events near your current location');
+    expect(persistedBody).toContain(nearby);
+    expect(persistedBody).not.toContain(farAway);
+
+    const clearRes = await app.inject({ method: 'GET', url: '/?loc=clear', headers: { cookie: cookieHeader } });
+    expect(clearRes.statusCode).toBe(200);
+    const clearBody = String(clearRes.body);
+    expect(clearBody).not.toContain('Showing events near');
+    expect(clearBody).toContain(nearby);
+    expect(clearBody).toContain(farAway);
   });
 });
