@@ -48,7 +48,27 @@ if [ -z "$ADMIN_TOKEN" ]; then
   ADMIN_TOKEN="$(grep -E '^ADMIN_TOKEN=' "$ENV_FILE" | tail -n 1 | sed 's/^ADMIN_TOKEN=//' | tr -d '\r' || true)"
 fi
 
-echo "[3/4] Smoke test"
+echo "[3/5] Wait for app readiness"
+ready=0
+i=0
+while [ "$i" -lt 60 ]; do
+  code="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "$BASE_URL/healthz" || printf '000')"
+  if [ "$code" = "200" ]; then
+    ready=1
+    break
+  fi
+  i=$((i + 1))
+  sleep 2
+done
+if [ "$ready" -ne 1 ]; then
+  echo "  App did not become ready at $BASE_URL/healthz (last HTTP $code)"
+  echo "  Recent app logs:"
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs --tail=120 "$SERVICE" || true
+  exit 1
+fi
+echo "  Ready"
+
+echo "[4/5] Smoke test"
 BASE_URL="$BASE_URL" ADMIN_TOKEN="$ADMIN_TOKEN" sh scripts/smoke.sh
 
-echo "[4/4] Done ($after_sha)"
+echo "[5/5] Done ($after_sha)"
