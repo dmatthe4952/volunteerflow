@@ -58,4 +58,4 @@ jobs:
     curl -X POST "${{ secrets.DEPLOY_SERVER }}" \
       -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN }}" \
       -H "Content-Type: application/json" \
-      -d "{\"image\":\"ghcr.io/${{ github.repository_owner }}/        ${{github.event.repository.name }}\",\"tags\":\"${{ steps.meta.outputs.tags }}\",\"commit_sha\":\"${{ github.sha }}\",\"timestamp\":\"$TIMESTAMP\"}"
+      -d "{ \"image\":\"ghcr.io/${{ github.repository_owner }}\\${{github.event.repository.name }}\",\"tags\":\"${{ steps.meta.outputs.tags }}\",\"commit_sha\":\"${{ github.sha }}\",\"timestamp\":\"$TIMESTAMP\"}"
