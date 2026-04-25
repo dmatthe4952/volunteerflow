@@ -1,0 +1,16 @@
+{% extends "layout.njk" %}
+{% block content %}
+  <h1>Confirm Access</h1>
+  <div class="panel">
+    <p class="muted">
+      This extra step helps prevent email security scanners from consuming your one-time link.
+    </p>
+    <form method="post" action="/my/verify/{{ token | urlencode }}/confirm">
+      <input type="hidden" name="remember" value="{% if remember %}1{% else %}0{% endif %}" />
+      <button class="btn primary" type="submit">
+        Continue to My Signups
+      </button>
+    </form>
+    <p style="margin-top:10px"><a href="/my">Back</a></p>
+  </div>
+{% endblock %}

@@ -1296,7 +1296,7 @@ export async function buildApp(params: {
 
   app.get('/my/verify/:token', async (req, reply) => {
     const { token } = req.params as { token: string };
-    const verified = await verifyMySignupsToken(params.db, token);
+    const verified = await verifyMySignupsToken(params.db, token, { consume: false });
     if (!verified) {
       const asCancel = await findActiveSignupByCancelToken(params.db, token);
       if (asCancel && asCancel.expired === false) return reply.code(303).redirect(`/cancel/${encodeURIComponent(token)}`);
@@ -1306,6 +1306,24 @@ export async function buildApp(params: {
 
     const qs = req.query as Record<string, string | undefined>;
     const remember = qs.remember !== '0';
+    return render(reply, 'my_verify_confirm.njk', {
+      token,
+      remember
+    });
+  });
+
+  app.post('/my/verify/:token/confirm', async (req, reply) => {
+    const { token } = req.params as { token: string };
+    const verified = await verifyMySignupsToken(params.db, token);
+    if (!verified) {
+      const asCancel = await findActiveSignupByCancelToken(params.db, token);
+      if (asCancel && asCancel.expired === false) return reply.code(303).redirect(`/cancel/${encodeURIComponent(token)}`);
+      return reply.code(410).view('my_link_expired.njk');
+    }
+    if (verified.expired) return reply.code(410).view('my_link_expired.njk');
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const remember = String(body.remember ?? '') === '1';
 
     if (remember) {
       reply.setCookie('vf_email', verified.email, {

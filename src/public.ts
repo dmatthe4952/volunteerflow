@@ -804,12 +804,26 @@ export async function requestMySignupsToken(db: Kysely<DB>, email: string) {
   return { token: rawToken, expiresAt };
 }
 
-export async function verifyMySignupsToken(db: Kysely<DB>, rawToken: string) {
+export async function verifyMySignupsToken(db: Kysely<DB>, rawToken: string, opts?: { consume?: boolean }) {
   if (!/^[a-f0-9]{64}$/.test(rawToken)) return null;
   const tokenHmac = crypto.createHmac('sha256', config.sessionSecret).update(rawToken).digest();
 
   const now = new Date();
   const nowIso = now.toISOString();
+  const consume = opts?.consume !== false;
+
+  if (!consume) {
+    const row = await db
+      .selectFrom('volunteer_email_tokens')
+      .select(['email', 'expires_at', 'used_at'])
+      .where('token_hmac', '=', tokenHmac)
+      .executeTakeFirst();
+
+    if (!row) return null;
+    if (row.used_at) return { expired: true as const };
+    if (Date.parse(row.expires_at) <= now.getTime()) return { expired: true as const };
+    return { expired: false as const, email: row.email as string };
+  }
 
   // Consume token on first successful verification.
   // This makes email links truly one-time (a second request will fail).

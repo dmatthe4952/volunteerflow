@@ -65,7 +65,7 @@ describe.skipIf(!DATABASE_URL)('public volunteer flows', () => {
     expect(Number(sends?.c ?? 0)).toBe(1);
   });
 
-  test('my-signups token is one-time (second use fails)', async () => {
+  test('my-signups token requires confirm and remains one-time after consumption', async () => {
     const { eventSlug, shiftId } = await seedBasicEvent(db);
     await app.inject({
       method: 'POST',
@@ -84,12 +84,31 @@ describe.skipIf(!DATABASE_URL)('public volunteer flows', () => {
     expect(match?.[1]).toBeTruthy();
     const token = match![1];
 
-    const resView1 = await app.inject({ method: 'GET', url: `/my/verify/${token}?remember=0` });
+    // Link open should not consume token (scanner-safe).
+    const resOpen1 = await app.inject({ method: 'GET', url: `/my/verify/${token}?remember=0` });
+    expect(resOpen1.statusCode).toBe(200);
+    expect(resOpen1.body).toContain('Confirm Access');
+
+    const resOpen2 = await app.inject({ method: 'GET', url: `/my/verify/${token}?remember=0` });
+    expect(resOpen2.statusCode).toBe(200);
+    expect(resOpen2.body).toContain('Confirm Access');
+
+    // Confirm action consumes token and shows one-time signups page.
+    const resView1 = await app.inject({
+      method: 'POST',
+      url: `/my/verify/${token}/confirm`,
+      payload: { remember: '0' }
+    });
     expect(resView1.statusCode).toBe(200);
     expect(resView1.body).toContain('My Signups (One-Time)');
     expect(resView1.body).toContain('Packing');
 
-    const resView2 = await app.inject({ method: 'GET', url: `/my/verify/${token}?remember=0` });
+    // Second confirm attempt fails because token is one-time.
+    const resView2 = await app.inject({
+      method: 'POST',
+      url: `/my/verify/${token}/confirm`,
+      payload: { remember: '0' }
+    });
     expect(resView2.statusCode).toBe(410);
   });
 

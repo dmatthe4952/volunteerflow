@@ -202,6 +202,33 @@ Run a quick end-to-end check after deploys:
 - `BASE_URL=https://www.trtechapp.com ADMIN_TOKEN=... sh scripts/smoke.sh`
 - Optional email send: `EMAIL_TO=you@domain.com BASE_URL=... ADMIN_TOKEN=... sh scripts/smoke.sh`
 
+### SMTP throughput policy (PurelyMail default)
+Goal: avoid provider throttling during reminder/broadcast bursts while still clearing scheduled sends quickly.
+
+Policy values (production default):
+- Reminder scheduler cadence: every 15 minutes.
+- Reminder per-offset cap: `--limit-per-offset 100`.
+- Effective reminder ceiling: if 3 offsets are active at once, max 300 sends per run (about 1,200/hour worst case).
+- Manual broadcasts: treat as high-impact; run in off-peak windows for very large events.
+
+Operational commands:
+1. Dry-run estimate for next reminder sweep:
+   - `node scripts/run.mjs reminder-scheduler --dry-run --limit-per-offset 100`
+2. One live reminder sweep with cap:
+   - `node scripts/run.mjs reminder-scheduler --limit-per-offset 100`
+3. Loop mode for dedicated worker:
+   - `node scripts/run.mjs reminder-scheduler --loop --interval-minutes 15 --limit-per-offset 100`
+
+Escalation guidance:
+1. If SMTP accepts are fast with no 4xx/5xx throttling, consider raising to `150`.
+2. If throttling appears (timeouts, provider temp rejects), lower to `50` and retry next cycle.
+3. Keep reminder sends below observed provider comfort level; do not increase cap during incidents.
+
+Verification checklist for production sign-off:
+1. Confirm current account-level send limits in PurelyMail dashboard and note date/time checked.
+2. Run one dry-run and one live run with the chosen cap.
+3. Confirm no SMTP throttle errors in app logs for two consecutive scheduler cycles.
+
 ### Admin token in shell (ops convenience)
 For operators who have access to the server repo folder, it can be convenient to have `ADMIN_TOKEN` in their shell environment for ops endpoints.
 
